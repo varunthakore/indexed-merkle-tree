@@ -1,0 +1,18 @@
+[package]
+name = "indexed-merkle-tree"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bellperson = "0.24.1"
+neptune = { version = "8.1.0", default-features = false }
+pasta_curves = { version = "0.5.2", package = "fil_pasta_curves", features = ["repr-c", "serde"] }
+generic-array = "0.14.6"
+ff = "0.13.0"
+rand = "0.8.5"
+crypto-bigint = "0.5.2"
+itertools = "0.10.5"
+num-bigint = "0.4.3"
+bellperson-nonnative = "0.4.0"
