@@ -58,7 +58,7 @@ pub fn hash_circuit<F: PrimeField, A: Arity<F>, CS: ConstraintSystem<F>>(cs: &mu
 mod tests {
     use super::*;
     use pasta_curves::pallas::Base as Fp;
-    use generic_array::typenum::{U2, U12};
+    use generic_array::typenum::{U2, U3};
     use bellperson::{util_cs::test_cs::TestConstraintSystem};
     use neptune::Strength;
     use neptune::sponge::vanilla::Sponge;
@@ -67,7 +67,7 @@ mod tests {
     #[test]
     fn test_leaf_hash() {
         let mut cs = TestConstraintSystem::<Fp>::new();
-        let inp = vec![Fp::from(123); 12];
+        let inp = vec![Fp::from(123); 3];
 
 
         let inp_alloc: Vec<AllocatedNum<Fp>> = inp
@@ -79,10 +79,10 @@ mod tests {
             .unwrap()
         ;
 
-        let p = Sponge::<Fp, U12>::api_constants(Strength::Standard);
-        let leaf_hash_out = hash_circuit::<Fp, U12, _>(&mut cs, inp_alloc, &p).unwrap();
+        let p = Sponge::<Fp, U3>::api_constants(Strength::Standard);
+        let leaf_hash_out = hash_circuit::<Fp, U3, _>(&mut cs, inp_alloc, &p).unwrap();
 
-        let exp_hash_out = hash::<Fp, U12>(inp.clone(), &p);  
+        let exp_hash_out = hash::<Fp, U3>(inp.clone(), &p);  
         let exp_hash_out_var = AllocatedNum::alloc(cs.namespace(|| "hash node"), || Ok(exp_hash_out)).unwrap();
 
         cs.enforce(
