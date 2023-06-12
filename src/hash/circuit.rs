@@ -24,7 +24,6 @@ pub fn hash_circuit<F: PrimeField, A: Arity<F>, CS: ConstraintSystem<F>>(cs: &mu
     let val_var: Vec<Elt<F>> = input
         .clone()
         .into_iter()
-        //.enumerate()
         .map(|s| Elt::Allocated(s))
         .collect()
     ;

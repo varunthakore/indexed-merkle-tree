@@ -1,18 +1,16 @@
 use neptune::poseidon::PoseidonConstants;
+use neptune::{Strength, Arity};
+use neptune::sponge::vanilla::{Sponge, SpongeTrait};
+use generic_array::typenum::{U2, U3};
+
 use pasta_curves::arithmetic::FieldExt;
 use pasta_curves::group::ff::{PrimeField, PrimeFieldBits};
-
-use crate::hash::vanilla::hash;
-use neptune::Arity;
-use std::marker::PhantomData;
-
-use std::collections::HashMap;
-use generic_array::typenum::{U2, U3};
-use neptune::sponge::vanilla::{Sponge, SpongeTrait};
-use neptune::Strength;
-
 use crypto_bigint::{U256, Encoding, CheckedAdd, CheckedSub};
 
+use std::marker::PhantomData;
+use std::collections::HashMap;
+
+use crate::hash::vanilla::hash;
 
 
 pub struct Leaf<F: PrimeField + PrimeFieldBits, A: Arity<F>> {
@@ -52,7 +50,8 @@ where
         input.push(self.next_index);
 
         assert_eq!(input.len(), 3);
-        input
+        // input = [value, next_value, next_index]
+        input 
     }
 
     pub fn hash_leaf(&self, p: &PoseidonConstants<F, A>) -> F {
@@ -112,7 +111,6 @@ impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> IndexTree<F, N> 
     ) {
         // Check that leaf at next_insertion_index is empty
         let next_leaf_idx = idx_to_bits(N, next_insertion_idx);
-        // let tree_copy = self.clone();
         let empty_path = self.get_siblings_path(next_leaf_idx.clone());
         assert!(empty_path.is_member_vanilla(next_leaf_idx.clone(), &Leaf::default(), self.root));
 
@@ -131,6 +129,7 @@ impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> IndexTree<F, N> 
             next_index: low_leaf.next_index,
             _arity: PhantomData::<U3>
         };
+
         // Update low leaf pointers
         low_leaf.next_index = next_insertion_idx;
         low_leaf.next_value = new_leaf.value;
@@ -176,7 +175,7 @@ impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> IndexTree<F, N> 
 
     }
 
-    // Get siblings given leaf index index
+    // Get siblings given leaf index
     pub fn get_siblings_path(
         &self,
         idx_in_bits: Vec<bool>, // root to leaf
@@ -332,14 +331,13 @@ mod tests {
     use std::marker::PhantomData;
 
     use pasta_curves::group::ff::Field;
-
     use pasta_curves::pallas::Base as Fp;
+
     use generic_array::typenum::U12;
     use neptune::sponge::vanilla::{Sponge, SpongeTrait};
     use neptune::Strength;
 
     use crate::tree::indextree::IndexTree;
-
     use super::Leaf;
 
     #[test]
@@ -364,6 +362,8 @@ mod tests {
         let mut tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
 
+        // Generate Vec of low_leaf and new_value
+        // Use for loop to insert
         let low_leaf_idx = idx_to_bits(HEIGHT, Fp::zero()); // from root to leaf
         let low_leaf = empty_leaf.clone();
         let new_value = Fp::random(&mut rng);

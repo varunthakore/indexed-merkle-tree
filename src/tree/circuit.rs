@@ -27,7 +27,7 @@ use num_bigint::Sign::Plus;
 // use itertools::concat;
 use crypto_bigint::CheckedMul;
 
-use crate::tree::indextree::Path;
+// use crate::tree::indextree::Path;
 
 // adapted from https://github.com/iden3/circomlib/blob/cff5ab6288b55ef23602221694a6a38a0239dcc0/circuits/comparators.circom#L89
 // Outputs true if in1 < in2, otherwise false 
