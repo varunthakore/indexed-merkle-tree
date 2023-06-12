@@ -1,6 +1,5 @@
-// use ff::BitViewSized;
 use pasta_curves::{
-    group::ff::{PrimeField, PrimeFieldBits},//, derive::bitvec::{macros::internal::funty::Integral, store::BitStore}},
+    group::ff::{PrimeField, PrimeFieldBits},
     arithmetic::FieldExt,
 };
 
@@ -12,22 +11,15 @@ use generic_array::typenum::{U2, U3};
 
 use bellperson::{ConstraintSystem, SynthesisError, gadgets::num::AllocatedNum};
 use bellperson::gadgets::boolean::{Boolean, AllocatedBit};
-use crate::hash::circuit::hash_circuit;
-use crypto_bigint::{U256, CheckedSub};
-use crypto_bigint::Encoding;
-use crypto_bigint::CheckedAdd;
+use crypto_bigint::{U256, CheckedSub, Encoding, CheckedAdd, CheckedMul};
 
 use bellperson_nonnative::util::num::Num;
 use bellperson_nonnative::mp::bignat::BigNat;
-// use bellperson_nonnative::mp::bignat::nat_to_limbs;
 use num_bigint::BigInt;
 use num_bigint::Sign::Plus;
-// use bellperson_nonnative::util::convert::f_to_nat;
-// use bellperson::Variable;
-// use itertools::concat;
-use crypto_bigint::CheckedMul;
 
-// use crate::tree::indextree::Path;
+use crate::hash::circuit::hash_circuit;
+
 
 // adapted from https://github.com/iden3/circomlib/blob/cff5ab6288b55ef23602221694a6a38a0239dcc0/circuits/comparators.circom#L89
 // Outputs true if in1 < in2, otherwise false 
@@ -37,7 +29,7 @@ pub fn is_less<'a, F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, C
     in2: AllocatedNum<F>,
 ) -> Result<Boolean, SynthesisError>
 {
-    let in1_big = BigNat::from_num(&mut cs.namespace(|| "in1 bignat"), Num::from(in1.clone()), 128, 2).unwrap();
+    let in1_big = BigNat::from_num(&mut cs.namespace(|| "in1 bignat"), Num::from(in1.clone()), 128, 2)?;
     let in2_big = BigNat::from_num(&mut cs.namespace(|| "in2 bignat"), Num::from(in2.clone()), 128, 2).unwrap();
 
     let exp255 = BigNat::alloc_from_nat(&mut cs.namespace(|| "exp255 bignat"), || Ok(BigInt::from_bytes_le(Plus, &(U256::from(1u64)<<255).to_le_bytes())), 128, 2).unwrap();
@@ -49,8 +41,8 @@ pub fn is_less<'a, F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, C
         &U256::from_le_bytes(F::to_repr(&in2.get_value().unwrap()))
     ).unwrap().to_le_bytes();
 
-    let diff_exp_big = BigNat::alloc_from_nat(&mut cs.namespace(|| "diff exp bignat"), || Ok(BigInt::from_bytes_le(Plus, &diff_exp)), 128, 2).unwrap();
-    BigNat::equal(&diff, &mut cs.namespace(|| "equal"), &diff_exp_big);
+    let diff_exp_big = BigNat::alloc_from_nat(&mut cs.namespace(|| "expected diff in bignat"), || Ok(BigInt::from_bytes_le(Plus, &diff_exp)), 128, 2).unwrap();
+    BigNat::equal(&diff, &mut cs.namespace(|| "enforce equal"), &diff_exp_big)?;
 
     let diff_exp_bits: Vec<bool> = diff_exp
         .map(|value| {
@@ -87,12 +79,12 @@ pub fn is_less<'a, F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, C
     let mut e2 = U256::from(1u64);
 
     for (i, v) in diff_bits_var.iter().enumerate() {
-        cs.enforce(
-            || format!("bit {i} is bit"),
-            |lc| lc + v.get_variable(),
-            |lc| lc + CS::one() - v.get_variable(),
-            |lc| lc,
-        );
+        // cs.enforce(
+        //     || format!("bit {i} is bit"),
+        //     |lc| lc + v.get_variable(),
+        //     |lc| lc + CS::one() - v.get_variable(),
+        //     |lc| lc,
+        // );
         
         lc1 = U256::checked_add(&lc1, &U256::from(v.get_value().unwrap() as u64).checked_mul(&e2).unwrap()).unwrap();
         if i==255 {
@@ -102,7 +94,7 @@ pub fn is_less<'a, F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, C
     }
 
     let lc1_big = BigNat::alloc_from_nat(&mut cs.namespace(|| "lc1 bignat"), || Ok(BigInt::from_bytes_le(Plus, &lc1.to_le_bytes())), 128, 2).unwrap();
-    BigNat::equal(&lc1_big, &mut cs.namespace(|| "final equal"), &diff_exp_big);
+    BigNat::equal(&lc1_big, &mut cs.namespace(|| "final equal"), &diff_exp_big)?;
 
 
     Ok(Boolean::from(diff_bits_var[255].clone()).not())
@@ -116,7 +108,7 @@ pub fn is_member<'a, F: PrimeField + PrimeFieldBits + FieldExt, const N: usize, 
     val_var: Vec<AllocatedNum<F>>,
     mut idx_var: Vec<AllocatedBit>,
     siblings_var: Vec<AllocatedNum<F>>
-) -> Result<AllocatedBit, SynthesisError> {
+) -> Result<Boolean, SynthesisError> {
 
     assert_eq!(val_var.len(), 3);
     assert_eq!(idx_var.len(), N);
@@ -135,9 +127,9 @@ pub fn is_member<'a, F: PrimeField + PrimeFieldBits + FieldExt, const N: usize, 
 
     }
 
-    let is_valid = AllocatedBit::alloc(cs.namespace(|| "is member"),Some(root_var.get_value() == cur_hash_var.get_value()));
+    let is_valid = AllocatedBit::alloc(cs.namespace(|| "is member"),Some(root_var.get_value() == cur_hash_var.get_value()))?;
 
-    is_valid
+    Ok(Boolean::from(is_valid))
 }
 
 pub fn is_non_member<'a, F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, const N: usize, CS: ConstraintSystem<F>>(
@@ -196,6 +188,7 @@ mod tests {
     use crypto_bigint::CheckedAdd;
 
     use num_bigint::BigUint;
+    use pasta_curves::group::ff::Field;
     
 
     #[test]
@@ -340,8 +333,9 @@ mod tests {
 
     #[test]
     fn test_less_circuit() {
-        let in1 = Fp::from(30 as u64);
-        let in2 = Fp::from(31 as u64);
+        let mut rng = rand::thread_rng();
+        let in1 = Fp::random(&mut rng);
+        let in2 = Fp::random(&mut rng);
         let mut cs = TestConstraintSystem::<Fp>::new();
 
 
@@ -349,7 +343,7 @@ mod tests {
 
         let in2_var: AllocatedNum<Fp> = AllocatedNum::alloc(cs.namespace(|| "in2"), || Ok(in2)).unwrap();
 
-        println!("in1 < in2 {:?}", is_less(&mut cs, in1_var, in2_var).unwrap().get_value());
+        println!("{:?} < {:?} {:?}", in1, in2, is_less(&mut cs, in1_var, in2_var).unwrap().get_value().unwrap());
 
         println!("the number of inputs are {:?}", cs.num_inputs());
         println!("the number of constraints are {}", cs.num_constraints());
