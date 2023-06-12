@@ -401,6 +401,10 @@ mod tests {
                 next_index: low_leaf.next_index,
                 _arity: PhantomData::<U3>   
             };
+
+            // Before inserting, is_member should fail
+            let inserted_path = tree.get_siblings_path(next_leaf_idx.clone());
+            assert!(!inserted_path.is_member_vanilla(next_leaf_idx.clone(), &new_leaf.clone(), tree.root));
     
             // Insert new value at next_insertion_index
             tree.insert_vanilla(low_leaf_idx.clone(), low_leaf, new_value.clone(), next_insertion_index);
