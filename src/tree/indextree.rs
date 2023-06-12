@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use crate::hash::vanilla::hash;
 
-
+#[derive(Debug)]
 pub struct Leaf<F: PrimeField + PrimeFieldBits, A: Arity<F>> {
     pub value: F,
     pub next_value: F,
@@ -333,12 +333,31 @@ mod tests {
     use pasta_curves::group::ff::Field;
     use pasta_curves::pallas::Base as Fp;
 
-    use generic_array::typenum::U12;
+    use generic_array::typenum::U3;
     use neptune::sponge::vanilla::{Sponge, SpongeTrait};
     use neptune::Strength;
 
     use crate::tree::indextree::IndexTree;
     use super::Leaf;
+
+    fn get_low_leaf(inserted_leaves: &mut Vec<Leaf<Fp, U3>>, new_value: Fp, next_insertion_index: Fp) -> (Leaf<Fp, U3> , Fp){
+        let mut low_leaf = Leaf::default();
+        let mut low_index = Fp::zero();
+        for (i, leaf) in inserted_leaves.iter().enumerate() {
+            if leaf.value < new_value && (leaf.next_value > new_value || leaf.next_value == Fp::zero()) {
+                low_leaf = leaf.clone();
+                low_index = Fp::from(i as u64);
+                inserted_leaves[i] = Leaf {
+                    value: leaf.value,
+                    next_value: new_value,
+                    next_index: next_insertion_index,
+                    _arity: PhantomData::<U3>
+                };
+                break;
+            }
+        }
+        (low_leaf, low_index)
+    }
 
     #[test]
     fn test_hash_leaf() {
@@ -349,7 +368,7 @@ mod tests {
             next_index: Fp::random(&mut rng),
             _arity: PhantomData
         };
-        let p = Sponge::<Fp, U12>::api_constants(Strength::Standard);
+        let p = Sponge::<Fp, U3>::api_constants(Strength::Standard);
         let hash_leaf = Leaf::hash_leaf(&leaf, &p);
         println!("hash value is {:?}", hash_leaf);
     }
@@ -360,31 +379,38 @@ mod tests {
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
         let mut tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
-        println!("root is {:?}", tree.root);
 
-        // Generate Vec of low_leaf and new_value
-        // Use for loop to insert
-        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::zero()); // from root to leaf
-        let low_leaf = empty_leaf.clone();
-        let new_value = Fp::random(&mut rng);
-        let next_insertion_index = Fp::one();
-        let next_leaf_idx = idx_to_bits(HEIGHT, next_insertion_index);
+        let mut inserted_leaves: Vec<Leaf<Fp, U3>> = vec![];
+        inserted_leaves.push(empty_leaf);
 
-        let new_leaf = Leaf {
-            value: new_value,
-            next_value: low_leaf.next_value,
-            next_index: low_leaf.next_index,
-            _arity: PhantomData::<U3>   
-        };
+        let mut next_insertion_index = Fp::zero();
 
-        // Insert new value at next_insertion_index
-        tree.insert_vanilla(low_leaf_idx.clone(), low_leaf, new_value.clone(), next_insertion_index);
-        println!("root is {:?}", tree.root);
+        let num_values = 1000;
+        let values: Vec<Fp> = (0..num_values).map(|_| Fp::random(&mut rng)).collect();
         
-        // Check that new leaf is inseted at next_insertion_index
-        let inserted_path = tree.get_siblings_path(next_leaf_idx.clone());
-        assert!(inserted_path.is_member_vanilla(next_leaf_idx.clone(), &new_leaf.clone(), tree.root));
-        
+        for new_value in  values {
+            
+            next_insertion_index += Fp::one();
+            let next_leaf_idx = idx_to_bits(HEIGHT, next_insertion_index);
+            let (low_leaf, low_index) = get_low_leaf(&mut inserted_leaves, new_value, next_insertion_index);
+            let low_leaf_idx = idx_to_bits(HEIGHT, low_index); 
+
+            let new_leaf = Leaf {
+                value: new_value,
+                next_value: low_leaf.next_value,
+                next_index: low_leaf.next_index,
+                _arity: PhantomData::<U3>   
+            };
+    
+            // Insert new value at next_insertion_index
+            tree.insert_vanilla(low_leaf_idx.clone(), low_leaf, new_value.clone(), next_insertion_index);
+            
+            // Check that new leaf is inseted at next_insertion_index
+            let inserted_path = tree.get_siblings_path(next_leaf_idx.clone());
+            assert!(inserted_path.is_member_vanilla(next_leaf_idx.clone(), &new_leaf.clone(), tree.root));
+
+            inserted_leaves.push(new_leaf);
+        }
     }
 
     #[test]
@@ -411,7 +437,7 @@ mod tests {
             _arity: PhantomData::<U3>   
         };
 
-        // Insert new_value at next_insertion_index
+        // Insert new_value=20 at next_insertion_index
         tree.insert_vanilla(low_leaf_idx.clone(), low_leaf.clone(), new_value.clone(), next_insertion_index);
         println!("root is {:?}", tree.root);
         
@@ -435,10 +461,11 @@ mod tests {
     }
 
     #[test]
-    fn test_less() {
-        let in1 = Fp::from(100 as u64);
-        let in2 = Fp::from(30 as u64);
+    fn test_less_vanilla() {
+        let mut rng = rand::thread_rng();
+        let in1 = Fp::random(&mut rng);
+        let in2 = Fp::random(&mut rng);
 
-        println!("in1 < in2 {}", is_less_vanilla(in1, in2))
+        println!("{:?} < {:?} {}", in1, in2, is_less_vanilla(in1, in2))
     } 
 }
