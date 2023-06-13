@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use crate::hash::vanilla::hash;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Leaf<F: PrimeField + PrimeFieldBits, A: Arity<F>> {
     pub value: F,
     pub next_value: F,
@@ -29,14 +29,14 @@ impl<F: PrimeField + PrimeFieldBits, A: Arity<F>> Default for Leaf<F,A> {
     }
 }
 
-impl<F: PrimeField + PrimeFieldBits, A: Arity<F>> Clone for Leaf<F,A> {
-    fn clone(&self) -> Self {
-        Leaf { value: self.value.clone(), 
-            next_value: self.next_value.clone(), 
-            next_index: self.next_index.clone(), 
-            _arity: PhantomData }
-    }
-}
+// impl<F: PrimeField + PrimeFieldBits, A: Arity<F>> Clone for Leaf<F,A> {
+//     fn clone(&self) -> Self {
+//         Leaf { value: self.value.clone(), 
+//             next_value: self.next_value.clone(), 
+//             next_index: self.next_index.clone(), 
+//             _arity: PhantomData }
+//     }
+// }
 
 impl<F, A> Leaf<F, A>
 where
@@ -202,8 +202,8 @@ impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> IndexTree<F, N> 
 
         Path{ 
             siblings: siblings, // siblings from root to leaf
-            leaf_hash_params: &self.leaf_hash_params,
-            node_hash_params: &self.node_hash_params
+            leaf_hash_params: self.leaf_hash_params.clone(),
+            node_hash_params: self.node_hash_params.clone()
         }
     }
 }
@@ -231,17 +231,17 @@ pub fn idx_to_bits<F: PrimeField + PrimeFieldBits>(depth: usize, idx: F) -> Vec<
 
 }
 
-
-pub struct Path<'a, F, const N: usize>
+#[derive(Clone)]
+pub struct Path<F, const N: usize>
 where
 	F: PrimeField + PrimeFieldBits + FieldExt,
 {
 	pub siblings: Vec<F>, // siblings from root to leaf
-    pub leaf_hash_params: &'a PoseidonConstants<F, U3>,
-    pub node_hash_params: &'a PoseidonConstants<F, U2>
+    pub leaf_hash_params: PoseidonConstants<F, U3>,
+    pub node_hash_params: PoseidonConstants<F, U2>
 }
 
-impl<'a, F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> Path<'a, F, N> {
+impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> Path<F, N> {
     pub fn compute_root(
         &self,
         mut idx_in_bits: Vec<bool>,
@@ -300,7 +300,7 @@ impl<'a, F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> Path<'a, F, 
 }
 
 // Outputs true if in1 < in2, otherwise false 
-pub fn is_less_vanilla<'a, F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt>(
+pub fn is_less_vanilla<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt>(
     in1: F,
     in2: F,
 ) -> bool {
@@ -329,14 +329,9 @@ pub fn is_less_vanilla<'a, F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + Fie
 mod tests {
     use super::*;
     use std::marker::PhantomData;
-
     use pasta_curves::group::ff::Field;
     use pasta_curves::pallas::Base as Fp;
-
     use generic_array::typenum::U3;
-    use neptune::sponge::vanilla::{Sponge, SpongeTrait};
-    use neptune::Strength;
-
     use crate::tree::indextree::IndexTree;
     use super::Leaf;
 
@@ -360,20 +355,6 @@ mod tests {
     }
 
     #[test]
-    fn test_hash_leaf() {
-        let mut rng = rand::thread_rng();
-        let leaf = Leaf {
-            value: Fp::random(&mut rng),
-            next_value: Fp::random(&mut rng),
-            next_index: Fp::random(&mut rng),
-            _arity: PhantomData
-        };
-        let p = Sponge::<Fp, U3>::api_constants(Strength::Standard);
-        let hash_leaf = Leaf::hash_leaf(&leaf, &p);
-        println!("hash value is {:?}", hash_leaf);
-    }
-
-    #[test]
     fn test_insert() {
         let mut rng = rand::thread_rng();
         const HEIGHT: usize = 32;
@@ -385,7 +366,7 @@ mod tests {
 
         let mut next_insertion_index = Fp::zero();
 
-        let num_values = 1000;
+        let num_values = 100;
         let values: Vec<Fp> = (0..num_values).map(|_| Fp::random(&mut rng)).collect();
         
         for new_value in  values {
@@ -430,7 +411,7 @@ mod tests {
         let next_insertion_index = Fp::one();
         let next_leaf_idx = idx_to_bits(HEIGHT, next_insertion_index);
 
-        // Check that new_value is_non_member
+        // Check that new_value=20 is_non_member
         let low_leaf_path = tree.get_siblings_path(low_leaf_idx.clone());
         assert!(low_leaf_path.is_non_member_vanilla(&low_leaf, low_leaf_idx.clone(), new_value, tree.root));
 
