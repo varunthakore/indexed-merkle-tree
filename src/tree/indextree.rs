@@ -114,7 +114,7 @@ impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> IndexTree<F, N> 
         let empty_path = self.get_siblings_path(next_leaf_idx.clone());
         assert!(empty_path.is_member_vanilla(next_leaf_idx.clone(), &Leaf::default(), self.root));
 
-        // Check that low leaf is memeber
+        // Check that low leaf is member
         let low_leaf_path = self.get_siblings_path(low_leaf_idx.clone());
         assert!(low_leaf_path.is_member_vanilla(low_leaf_idx.clone(), &low_leaf, self.root));
 
