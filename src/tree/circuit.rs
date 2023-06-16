@@ -311,18 +311,15 @@ pub fn insert<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, const 
 
 }
 
-
+#[cfg(test)]
 mod tests {
     use super::*;
     use bellperson::{ConstraintSystem, SynthesisError, gadgets::num::AllocatedNum};
-    use generic_array::typenum::{U2, U3};
+    use generic_array::typenum::U3;
     use pasta_curves::Fp;
-    use crate::tree::indextree::{IndexTree, idx_to_bits, Leaf, Path};
+    use crate::tree::indextree::{IndexTree, idx_to_bits, Leaf};
     use bellperson::util_cs::test_cs::TestConstraintSystem;
     use std::marker::PhantomData;
-    use crypto_bigint::CheckedAdd;
-
-    use num_bigint::BigUint;
     use pasta_curves::group::ff::Field;
 
     

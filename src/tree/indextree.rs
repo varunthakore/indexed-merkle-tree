@@ -5,7 +5,6 @@ use generic_array::typenum::{U2, U3};
 
 use pasta_curves::arithmetic::FieldExt;
 use pasta_curves::group::ff::{PrimeField, PrimeFieldBits};
-use crypto_bigint::{U256, Encoding, CheckedAdd, CheckedSub};
 
 use std::marker::PhantomData;
 use std::collections::HashMap;
@@ -28,15 +27,6 @@ impl<F: PrimeField + PrimeFieldBits, A: Arity<F>> Default for Leaf<F,A> {
             _arity: PhantomData }
     }
 }
-
-// impl<F: PrimeField + PrimeFieldBits, A: Arity<F>> Clone for Leaf<F,A> {
-//     fn clone(&self) -> Self {
-//         Leaf { value: self.value.clone(), 
-//             next_value: self.next_value.clone(), 
-//             next_index: self.next_index.clone(), 
-//             _arity: PhantomData }
-//     }
-// }
 
 impl<F, A> Leaf<F, A>
 where
@@ -299,31 +289,6 @@ impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> Path<F, N> {
     }
 }
 
-// Outputs true if in1 < in2, otherwise false 
-pub fn is_less_vanilla<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt>(
-    in1: F,
-    in2: F,
-) -> bool {
-    let in1_u256 = U256::from_le_bytes(F::to_repr(&in1));
-    let in2_u256 = U256::from_le_bytes(F::to_repr(&in2));
-    
-    let diff = U256::checked_sub(&U256::checked_add(&in1_u256, &(U256::from(1u64)<<255)).unwrap(), &in2_u256).unwrap();
-    let diff_bytes = diff.to_le_bytes();
-
-    let diff_bits: Vec<bool> = diff_bytes
-        .map(|value| {
-            let mut bits = [false; 8];
-            for i in 0..8 {
-                bits[i] = (value >> i) & 1 == 1;
-            }
-            bits
-        })
-        .concat()
-    ;
-    assert_eq!(diff_bits.len(), 256);
-    !diff_bits[255]
-}
-
 
 #[cfg(test)]
 mod tests {
@@ -335,19 +300,13 @@ mod tests {
     use crate::tree::indextree::IndexTree;
     use super::Leaf;
 
-    fn get_low_leaf(inserted_leaves: &mut Vec<Leaf<Fp, U3>>, new_value: Fp, next_insertion_index: Fp) -> (Leaf<Fp, U3> , Fp){
+    fn get_low_leaf(inserted_leaves: &mut Vec<Leaf<Fp, U3>>, new_value: Fp) -> (Leaf<Fp, U3> , u64){
         let mut low_leaf = Leaf::default();
-        let mut low_index = Fp::zero();
+        let mut low_index = 0;
         for (i, leaf) in inserted_leaves.iter().enumerate() {
             if leaf.value < new_value && (leaf.next_value > new_value || leaf.next_value == Fp::zero()) {
                 low_leaf = leaf.clone();
-                low_index = Fp::from(i as u64);
-                inserted_leaves[i] = Leaf {
-                    value: leaf.value,
-                    next_value: new_value,
-                    next_index: next_insertion_index,
-                    _arity: PhantomData::<U3>
-                };
+                low_index = i as u64;
                 break;
             }
         }
@@ -373,7 +332,15 @@ mod tests {
             
             next_insertion_index += Fp::one();
             let next_leaf_idx = idx_to_bits(HEIGHT, next_insertion_index);
-            let (low_leaf, low_index) = get_low_leaf(&mut inserted_leaves, new_value, next_insertion_index);
+            let (low_leaf, low_index_int) = get_low_leaf(&mut inserted_leaves, new_value);
+            // Update the low_leaf in inserted leaves
+            inserted_leaves[low_index_int as usize] = Leaf {
+                value: low_leaf.value,
+                next_value: new_value,
+                next_index: next_insertion_index,
+                _arity: PhantomData::<U3>
+            };
+            let low_index = Fp::from(low_index_int);
             let low_leaf_idx = idx_to_bits(HEIGHT, low_index); 
 
             let new_leaf = Leaf {
@@ -444,13 +411,4 @@ mod tests {
         assert!(inserted_path.is_non_member_vanilla(&new_leaf, next_leaf_idx, Fp::from(40 as u64), tree.root));  
 
     }
-
-    #[test]
-    fn test_less_vanilla() {
-        let mut rng = rand::thread_rng();
-        let in1 = Fp::random(&mut rng);
-        let in2 = Fp::random(&mut rng);
-
-        println!("{:?} < {:?} {}", in1, in2, is_less_vanilla(in1, in2))
-    } 
 }
