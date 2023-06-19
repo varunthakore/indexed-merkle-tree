@@ -14,7 +14,7 @@ use generic_array::typenum::{U2, U3};
 use bellperson::{ConstraintSystem, SynthesisError, gadgets::num::AllocatedNum};
 use bellperson::gadgets::boolean::{Boolean, AllocatedBit};
 use bellperson::Namespace;
-use crypto_bigint::{U256, CheckedSub, Encoding, CheckedAdd, CheckedMul};
+use crypto_bigint::{U256, CheckedSub, Encoding, CheckedAdd};
 
 use bellperson_nonnative::util::num::Num;
 use bellperson_nonnative::mp::bignat::BigNat;
@@ -26,7 +26,7 @@ use crate::{hash::circuit::hash_circuit, tree::indextree::{Path, Leaf, idx_to_bi
 use super::indextree::IndexTree;
 
 
-// adapted from https://github.com/iden3/circomlib/blob/cff5ab6288b55ef23602221694a6a38a0239dcc0/circuits/comparators.circom#L89
+// Code adapted from https://github.com/iden3/circomlib/blob/cff5ab6288b55ef23602221694a6a38a0239dcc0/circuits/comparators.circom#L89
 // Outputs true if in1 < in2, otherwise false 
 pub fn is_less<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, CS: ConstraintSystem<F>>(
     cs: &mut CS,
@@ -34,69 +34,48 @@ pub fn is_less<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, CS: C
     in2: AllocatedNum<F>,
 ) -> Result<Boolean, SynthesisError>
 {
-    let in1_big = BigNat::from_num(&mut cs.namespace(|| "in1 bignat"), Num::from(in1.clone()), 128, 2)?;
-    let in2_big = BigNat::from_num(&mut cs.namespace(|| "in2 bignat"), Num::from(in2.clone()), 128, 2)?;
-
-    let exp255 = BigNat::alloc_from_nat(&mut cs.namespace(|| "exp255 bignat"), || Ok(BigInt::from_bytes_le(Plus, &(U256::from(1u64)<<255).to_le_bytes())), 128, 2)?;
-
-    let diff = BigNat::sub(&BigNat::add::<CS>(&in1_big, &exp255)?, &mut cs.namespace(|| "sub"), &in2_big)?;
+    let in1_big = BigNat::from_num(
+        &mut cs.namespace(|| "input 1 bignat"),
+        Num::from(in1.clone()), 
+        128, 
+        2)?
+    ;
+    let in2_big = BigNat::from_num(
+        &mut cs.namespace(|| "input 2 bignat"),
+        Num::from(in2.clone()),
+        128,
+        2)?
+    ;
+    let exp255 = BigNat::alloc_from_nat(
+        &mut cs.namespace(|| "exp255 bignat"),
+        || Ok(BigInt::from_bytes_le(Plus, &(U256::from(1u64)<<255).to_le_bytes())),
+        128,
+        2)?
+    ;
+    let diff = BigNat::sub(
+        &BigNat::add::<CS>(&in1_big, &exp255)?, 
+        &mut cs.namespace(|| "sub"), 
+        &in2_big)?
+    ;
 
     let diff_exp = U256::checked_sub(
-        &U256::checked_add(&U256::from_le_bytes(F::to_repr(&in1.get_value().unwrap())), &(U256::from(1u64)<<255)).unwrap(), 
+        &U256::checked_add(
+            &U256::from_le_bytes(F::to_repr(&in1.get_value().unwrap())), 
+            &(U256::from(1u64)<<255)).unwrap(), 
         &U256::from_le_bytes(F::to_repr(&in2.get_value().unwrap()))
     ).unwrap().to_le_bytes();
 
-    let diff_exp_big = BigNat::alloc_from_nat(&mut cs.namespace(|| "expected diff in bignat"), || Ok(BigInt::from_bytes_le(Plus, &diff_exp)), 128, 2)?;
+    let diff_exp_big = BigNat::alloc_from_nat(
+        &mut cs.namespace(|| "expected diff in bignat"), 
+        || Ok(BigInt::from_bytes_le(Plus, &diff_exp)), 
+        128, 
+        2)?
+    ;
     BigNat::equal(&diff, &mut cs.namespace(|| "check equal"), &diff_exp_big)?;
 
-    let diff_exp_bits: Vec<bool> = diff_exp
-        .map(|value| {
-            let mut bits = [false; 8];
-            for i in 0..8 {
-                bits[i] = (value >> i) & 1 == 1;
-            }
-            bits
-        })
-        .concat()
-    ;
-    assert_eq!(diff_exp_bits.len(), 256);
-
-    // Allocate all bits
-    let diff_bits_var: Vec<AllocatedBit> = (0..256)
-        .map(|i| {
-            AllocatedBit::alloc(
-                cs.namespace(|| format!("bit {i}")),
-                {
-                    let r = if diff_exp_bits[i] {
-                        true
-                    } else {
-                        false
-                    };
-                    Some(r)
-                },
-            )
-        })
-        .collect::<Result<_, _>>()?;
-
-    assert_eq!(diff_bits_var.len(), 256);
-    
-    let mut lc1 = U256::from(0u64);
-    let mut e2 = U256::from(1u64);
-
-    for (i, v) in diff_bits_var.iter().enumerate() {
-        lc1 = U256::checked_add(&lc1, &U256::from(v.get_value().unwrap() as u64).checked_mul(&e2).unwrap()).unwrap();
-        if i==255 {
-            break;
-        }
-        e2 = U256::checked_add(&e2, &e2).unwrap();
-    }
-
-    let lc1_big = BigNat::alloc_from_nat(&mut cs.namespace(|| "lc1 bignat"), || Ok(BigInt::from_bytes_le(Plus, &lc1.to_le_bytes())), 128, 2)?;
-    BigNat::equal(&lc1_big, &mut cs.namespace(|| "final equal"), &diff_exp_big)?;
-
-
-    Ok(Boolean::from(diff_bits_var[255].clone()).not())
-
+    let diff_bits_var = diff.decompose(cs)?;
+    assert_eq!(diff_bits_var.allocations.len(), 256);
+    Ok(Boolean::constant(diff_bits_var.allocations[255].value.unwrap()).not())
 }
 
 
@@ -507,14 +486,19 @@ mod tests {
         let mut rng = rand::thread_rng();
         let in1 = Fp::random(&mut rng);
         let in2 = Fp::random(&mut rng);
+
         let mut cs = TestConstraintSystem::<Fp>::new();
+
+        let in1_int = U256::from_le_bytes(in1.to_repr());
+        let in2_int = U256::from_le_bytes(in2.to_repr());
 
 
         let in1_var: AllocatedNum<Fp> = AllocatedNum::alloc(cs.namespace(|| "in1"), || Ok(in1)).unwrap();
-
         let in2_var: AllocatedNum<Fp> = AllocatedNum::alloc(cs.namespace(|| "in2"), || Ok(in2)).unwrap();
-
-        println!("{:?} < {:?} {:?}", in1, in2, is_less(&mut cs, in1_var, in2_var).unwrap().get_value().unwrap());
+        let op = is_less(&mut cs, in1_var, in2_var).unwrap().get_value().unwrap();
+        
+        println!("{:?} < {:?} {:?}", in1, in2, op.clone());
+        assert_eq!(in1_int < in2_int , op);
 
         println!("the number of inputs are {:?}", cs.num_inputs());
         println!("the number of constraints are {}", cs.num_constraints());
