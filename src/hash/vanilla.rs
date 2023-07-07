@@ -1,7 +1,5 @@
 use neptune::poseidon::PoseidonConstants;
-use pasta_curves::{
-    group::ff::PrimeField,
-};
+use ff::PrimeField;
 use neptune::Arity;
 
 use neptune::sponge::{

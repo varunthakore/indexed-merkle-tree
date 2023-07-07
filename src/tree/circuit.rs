@@ -1,8 +1,4 @@
-use pasta_curves::{
-    group::ff::{PrimeField, PrimeFieldBits},
-    arithmetic::FieldExt,
-};
-
+use ff::{PrimeField, PrimeFieldBits};
 use neptune::{Arity, Strength};
 use neptune::sponge::{
     vanilla::{Sponge, SpongeTrait},
@@ -26,7 +22,7 @@ use super::indextree::IndexTree;
 
 // Code adapted from https://github.com/iden3/circomlib/blob/cff5ab6288b55ef23602221694a6a38a0239dcc0/circuits/comparators.circom#L89
 // Outputs true if in1 < in2, otherwise false 
-pub fn is_less<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, CS: ConstraintSystem<F>>(
+pub fn is_less<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     in1: AllocatedNum<F>,
     in2: AllocatedNum<F>,
@@ -86,7 +82,7 @@ pub struct AllocatedLeaf<F: PrimeField + PrimeFieldBits> {
 
 impl<F> AllocatedLeaf<F>
 where
-    F: PrimeField + PrimeFieldBits + FieldExt,
+    F: PrimeField + PrimeFieldBits,
 {
     pub fn alloc_leaf_to_vec(&self) -> Vec<AllocatedNum<F>> {
         let mut input: Vec<AllocatedNum<F>> = vec![];
@@ -109,7 +105,7 @@ where
 }
 
 
-pub fn is_member<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize, CS: ConstraintSystem<F>>(
+pub fn is_member<F: PrimeField + PrimeFieldBits, const N: usize, CS: ConstraintSystem<F>>(
     cs: &mut CS,
     root_var: AllocatedNum<F>,
     leaf_var: AllocatedLeaf<F>,
@@ -156,7 +152,7 @@ pub fn is_member<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize, CS: 
     Ok(Boolean::from(is_valid))
 }
 
-pub fn is_non_member<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, const N: usize, CS: ConstraintSystem<F>>(
+pub fn is_non_member<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits, const N: usize, CS: ConstraintSystem<F>>(
     mut cs: &mut CS,
     root_var: AllocatedNum<F>,
     low_leaf_var: AllocatedLeaf<F>,
@@ -179,7 +175,7 @@ pub fn is_non_member<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt,
 
     let out: Boolean; 
 
-    if low_leaf_var.next_index.get_value().unwrap()==F::zero() { // the low leaf is at the very end, so the new_value must be higher than all values in the tree
+    if low_leaf_var.next_index.get_value().unwrap()==F::ZERO { // the low leaf is at the very end, so the new_value must be higher than all values in the tree
         // low_leaf.value < new_value 
         out = is_less(
             &mut cs.namespace(|| "low_leaf.value < new_value"), 
@@ -207,7 +203,7 @@ pub fn is_non_member<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt,
 }
 
 // Remeber to check that new_value is_non_member before calling insert
-pub fn insert<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, const N: usize, CS: ConstraintSystem<F>, A: Arity<F>>(
+pub fn insert<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + PartialOrd, const N: usize, CS: ConstraintSystem<F>, A: Arity<F>>(
     mut cs: &mut CS,
     mut tree: IndexTree<F, N>,
     root_var: AllocatedNum<F>,
@@ -269,7 +265,7 @@ pub fn insert<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + FieldExt, const 
     let check_less = is_less(&mut cs, new_val.clone(), low_leaf_var.next_value.clone())?;
     let check_zero = Boolean::from(AllocatedBit::alloc(
         cs.namespace(|| "is zero"),
-        Some(low_leaf_var.next_value.get_value().unwrap() == F::zero()))?)
+        Some(low_leaf_var.next_value.get_value().unwrap() == F::ZERO))?)
     ;
     let check_range1 = Boolean::not(&Boolean::and(&mut cs,
         &Boolean::not(&check_less),
@@ -381,7 +377,7 @@ mod tests {
         let tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
 
-        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::zero()); // from root to leaf
+        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::ZERO); // from root to leaf
         let low_leaf = empty_leaf.clone();
         let new_value = Fp::random(&mut rng);
         let next_insertion_index = Fp::one();
@@ -414,7 +410,7 @@ mod tests {
         let mut tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
 
-        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::zero()); // from root to leaf
+        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::ZERO); // from root to leaf
         let low_leaf = empty_leaf.clone();
         let new_value = Fp::random(&mut rng);
         let next_insertion_index = Fp::one();
@@ -475,7 +471,7 @@ mod tests {
         let mut tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
 
-        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::zero()); // from root to leaf
+        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::ZERO); // from root to leaf
         let low_leaf = empty_leaf.clone();
         let new_value = Fp::from(20 as u64);
         let next_insertion_index = Fp::one();

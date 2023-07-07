@@ -3,11 +3,11 @@ use neptune::{Strength, Arity};
 use neptune::sponge::vanilla::{Sponge, SpongeTrait};
 use generic_array::typenum::{U2, U3};
 
-use pasta_curves::arithmetic::FieldExt;
-use pasta_curves::group::ff::{PrimeField, PrimeFieldBits};
+use ff::{PrimeField, PrimeFieldBits};
 
 use std::marker::PhantomData;
 use std::collections::HashMap;
+use std::cmp::PartialOrd;
 
 use crate::hash::vanilla::hash;
 
@@ -21,16 +21,16 @@ pub struct Leaf<F: PrimeField + PrimeFieldBits, A: Arity<F>> {
 
 impl<F: PrimeField + PrimeFieldBits, A: Arity<F>> Default for Leaf<F,A> {
     fn default() -> Self {
-        Self { value: F::zero(), 
-            next_value: F::zero(), 
-            next_index: F::zero(), 
+        Self { value: F::ZERO, 
+            next_value: F::ZERO, 
+            next_index: F::ZERO, 
             _arity: PhantomData }
     }
 }
 
 impl<F, A> Leaf<F, A>
 where
-    F: PrimeField + PrimeFieldBits + FieldExt,
+    F: PrimeField + PrimeFieldBits,
     A: Arity<F>
 {
     pub fn leaf_to_vec(&self) -> Vec<F> {
@@ -50,14 +50,14 @@ where
     }
 }
 
-pub struct IndexTree<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> {
+pub struct IndexTree<F: PrimeField + PrimeFieldBits, const N: usize> {
     pub root: F,
     pub hash_db: HashMap<String, (F,F)>,
     pub leaf_hash_params: PoseidonConstants<F, U3>,
     pub node_hash_params: PoseidonConstants<F, U2>
 }
 
-impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> Clone for IndexTree<F, N> {
+impl<F: PrimeField + PrimeFieldBits, const N: usize> Clone for IndexTree<F, N> {
     fn clone(&self) -> Self {
         IndexTree { root: self.root.clone(), 
                     hash_db: self.hash_db.clone(), 
@@ -67,7 +67,7 @@ impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> Clone for IndexT
     }
 }
 
-impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> IndexTree<F, N> {
+impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> IndexTree<F, N> {
     
     // Create a new tree. `empty_leaf_val` is the default value for leaf of empty tree. 
     pub fn new(
@@ -109,7 +109,7 @@ impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> IndexTree<F, N> 
         assert!(low_leaf_path.is_member_vanilla(low_leaf_idx.clone(), &low_leaf, self.root));
 
         // Range check low leaf against new value
-        assert!(new_val < low_leaf.next_value || low_leaf.next_value == F::zero());
+        assert!(new_val < low_leaf.next_value || low_leaf.next_value == F::ZERO);
         assert!(new_val > low_leaf.value);
 
         // Update new leaf pointers
@@ -224,14 +224,14 @@ pub fn idx_to_bits<F: PrimeField + PrimeFieldBits>(depth: usize, idx: F) -> Vec<
 #[derive(Clone)]
 pub struct Path<F, const N: usize>
 where
-	F: PrimeField + PrimeFieldBits + FieldExt,
+	F: PrimeField + PrimeFieldBits,
 {
 	pub siblings: Vec<F>, // siblings from root to leaf
     pub leaf_hash_params: PoseidonConstants<F, U3>,
     pub node_hash_params: PoseidonConstants<F, U2>
 }
 
-impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> Path<F, N> {
+impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> Path<F, N> {
     pub fn compute_root(
         &self,
         mut idx_in_bits: Vec<bool>,
@@ -279,7 +279,7 @@ impl<F: PrimeField + PrimeFieldBits + FieldExt, const N: usize> Path<F, N> {
         assert!(self.is_member_vanilla(low_leaf_idx.clone(), &low_leaf, root));
         
         // Range check low leaf against new value
-        if low_leaf.next_index == F::zero() {
+        if low_leaf.next_index == F::ZERO {
             return low_leaf.value < new_value // the low leaf is at the very end, so the new_value must be higher than all values in the tree
         } 
         else {
@@ -304,7 +304,7 @@ mod tests {
         let mut low_leaf = Leaf::default();
         let mut low_index = 0;
         for (i, leaf) in inserted_leaves.iter().enumerate() {
-            if leaf.value < new_value && (leaf.next_value > new_value || leaf.next_value == Fp::zero()) {
+            if leaf.value < new_value && (leaf.next_value > new_value || leaf.next_value == Fp::ZERO) {
                 low_leaf = leaf.clone();
                 low_index = i as u64;
                 break;
@@ -323,7 +323,7 @@ mod tests {
         let mut inserted_leaves: Vec<Leaf<Fp, U3>> = vec![];
         inserted_leaves.push(empty_leaf);
 
-        let mut next_insertion_index = Fp::zero();
+        let mut next_insertion_index = Fp::ZERO;
 
         let num_values = 100;
         let values: Vec<Fp> = (0..num_values).map(|_| Fp::random(&mut rng)).collect();
@@ -372,7 +372,7 @@ mod tests {
         let mut tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
 
-        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::zero()); // from root to leaf
+        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::ZERO); // from root to leaf
         let low_leaf = empty_leaf.clone();
         let new_value = Fp::from(20 as u64);
         let next_insertion_index = Fp::one();

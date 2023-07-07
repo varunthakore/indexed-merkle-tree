@@ -1,6 +1,4 @@
-use pasta_curves::{
-    group::ff::PrimeField,
-};
+use ff::PrimeField;
 use neptune::{
     Arity,
     circuit2::Elt, 
