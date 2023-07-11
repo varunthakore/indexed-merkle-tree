@@ -177,7 +177,7 @@ pub fn is_non_member<
     const N: usize,
     CS: ConstraintSystem<F>,
 >(
-    mut cs: &mut CS,
+    mut cs: CS,
     root_var: AllocatedNum<F>,
     low_leaf_var: AllocatedLeaf<F, A>,
     low_leaf_idx_var: Vec<AllocatedBit>,
@@ -233,7 +233,7 @@ pub fn insert<
     const N: usize,
     CS: ConstraintSystem<F>,
 >(
-    mut cs: &mut CS,
+    mut cs: CS,
     mut tree: IndexTree<F, N>,
     root_var: AllocatedNum<F>,
     new_val: AllocatedNum<F>,
@@ -426,8 +426,8 @@ mod tests {
             AllocatedNum::alloc_input(cs.namespace(|| "root var"), || Ok(tree.root)).unwrap();
         let new_val_var =
             AllocatedNum::alloc(cs.namespace(|| "new value"), || Ok(new_value)).unwrap();
-        insert::<Fp, U3, HEIGHT, TestConstraintSystem<Fp>>(
-            &mut cs,
+        insert::<Fp, U3, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
+            cs.namespace(|| "Insert value"),
             tree.clone(),
             root_var,
             new_val_var,
@@ -569,14 +569,15 @@ mod tests {
         let alloc_non_member =
             AllocatedNum::alloc(cs.namespace(|| "non member"), || Ok(non_member)).unwrap();
         // Check new_leaf is_non_member
-        let is_non_member = is_non_member::<Fp, U3, HEIGHT, TestConstraintSystem<Fp>>(
-            &mut cs,
-            root_var,
-            val_var,
-            idx_var,
-            siblings_var,
-            alloc_non_member,
-        );
+        let is_non_member =
+            is_non_member::<Fp, U3, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
+                cs.namespace(|| "check non member"),
+                root_var,
+                val_var,
+                idx_var,
+                siblings_var,
+                alloc_non_member,
+            );
         println!("is_non_member {:?}", is_non_member.unwrap().get_value());
         println!("the number of inputs are {:?}", cs.num_inputs());
         println!("the number of constraints are {}", cs.num_constraints());
