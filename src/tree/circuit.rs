@@ -172,23 +172,36 @@ pub fn is_member<
 }
 
 pub fn is_non_member<
-    F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits,
+    F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + PartialOrd,
     A: Arity<F>,
     const N: usize,
     CS: ConstraintSystem<F>,
 >(
     mut cs: CS,
     root_var: AllocatedNum<F>,
-    low_leaf_var: AllocatedLeaf<F, A>,
-    low_leaf_idx_var: Vec<AllocatedBit>,
-    low_leaf_siblings_var: Vec<AllocatedNum<F>>,
+    tree: IndexTree<F, N>,
     new_value: AllocatedNum<F>,
 ) -> Result<Boolean, SynthesisError> {
-    assert_eq!(low_leaf_idx_var.len(), N);
-    assert_eq!(low_leaf_idx_var.len(), low_leaf_siblings_var.len());
+    // Get low leaf
+    let (low_leaf, low_index_int) = tree.get_low_leaf(new_value.get_value().unwrap());
+    let low_leaf_var: AllocatedLeaf<F, U3> = AllocatedLeaf::alloc_leaf(&mut cs, low_leaf);
+    let low_leaf_idx = idx_to_bits(N, F::from(low_index_int));
+    let low_leaf_siblings = tree.get_siblings_path(low_leaf_idx.clone()).siblings;
+
+    let low_leaf_siblings_var: Vec<AllocatedNum<F>> = low_leaf_siblings
+        .into_iter()
+        .enumerate()
+        .map(|(i, s)| AllocatedNum::alloc(cs.namespace(|| format!("sibling {}", i)), || Ok(s)))
+        .collect::<Result<Vec<AllocatedNum<F>>, SynthesisError>>()?;
+
+    let low_leaf_idx_var: Vec<AllocatedBit> = low_leaf_idx
+        .into_iter()
+        .enumerate()
+        .map(|(i, b)| AllocatedBit::alloc(cs.namespace(|| format!("idx {}", i)), Some(b)))
+        .collect::<Result<Vec<AllocatedBit>, SynthesisError>>()?;
 
     // check that low_leaf_var is_member
-    let is_member = Boolean::from(is_member::<F, A, N, CS>(
+    let is_member = Boolean::from(is_member::<F, U3, N, CS>(
         &mut cs,
         root_var.clone(),
         low_leaf_var.clone(),
@@ -549,22 +562,6 @@ mod tests {
         let root_var: AllocatedNum<Fp> =
             AllocatedNum::alloc_input(cs.namespace(|| "root"), || Ok(tree.root)).unwrap();
 
-        let val_var: AllocatedLeaf<Fp, U3> = AllocatedLeaf::alloc_leaf(&mut cs, new_leaf);
-
-        let siblings_var: Vec<AllocatedNum<Fp>> = inserted_path
-            .siblings
-            .into_iter()
-            .enumerate()
-            .map(|(i, s)| AllocatedNum::alloc(cs.namespace(|| format!("sibling {}", i)), || Ok(s)))
-            .collect::<Result<Vec<AllocatedNum<Fp>>, SynthesisError>>()
-            .unwrap();
-
-        let idx_var: Vec<AllocatedBit> = next_leaf_idx
-            .into_iter()
-            .enumerate()
-            .map(|(i, b)| AllocatedBit::alloc(cs.namespace(|| format!("idx {}", i)), Some(b)))
-            .collect::<Result<Vec<AllocatedBit>, SynthesisError>>()
-            .unwrap();
         let non_member = Fp::from(30u64);
         let alloc_non_member =
             AllocatedNum::alloc(cs.namespace(|| "non member"), || Ok(non_member)).unwrap();
@@ -573,9 +570,7 @@ mod tests {
             is_non_member::<Fp, U3, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
                 cs.namespace(|| "check non member"),
                 root_var,
-                val_var,
-                idx_var,
-                siblings_var,
+                tree.clone(),
                 alloc_non_member,
             );
         println!("is_non_member {:?}", is_non_member.unwrap().get_value());
