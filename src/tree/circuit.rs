@@ -1,17 +1,14 @@
 use ff::{PrimeField, PrimeFieldBits};
-use generic_array::typenum::{U2, U3};
 use neptune::sponge::vanilla::{Sponge, SpongeTrait};
 use neptune::{Arity, Strength};
 
 use bellperson::gadgets::boolean::{AllocatedBit, Boolean};
 use bellperson::Namespace;
 use bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
-use crypto_bigint::{CheckedAdd, CheckedSub, Encoding, U256};
 
 use bellperson_nonnative::mp::bignat::BigNat;
 use bellperson_nonnative::util::num::Num;
 use num_bigint::BigInt;
-use num_bigint::Sign::Plus;
 
 use crate::{
     hash::circuit::hash_circuit,
@@ -43,10 +40,7 @@ pub fn is_less<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits, CS: ConstraintSy
     let exp255 = BigNat::alloc_from_nat(
         &mut cs.namespace(|| "exp255 bignat"),
         || {
-            Ok(BigInt::from_bytes_le(
-                Plus,
-                &(U256::from(1u64) << 255).to_le_bytes(),
-            ))
+            Ok(BigInt::from(2u64).pow(255))
         },
         128,
         2,
@@ -57,28 +51,31 @@ pub fn is_less<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits, CS: ConstraintSy
         &in2_big,
     )?;
 
-    let diff_exp = U256::checked_sub(
-        &U256::checked_add(
-            &U256::from_le_bytes(F::to_repr(&in1.get_value().unwrap())),
-            &(U256::from(1u64) << 255),
-        )
-        .unwrap(),
-        &U256::from_le_bytes(F::to_repr(&in2.get_value().unwrap())),
-    )
-    .unwrap()
-    .to_le_bytes();
+    // COMMENTING SINCE diff IS CALCULATED IN CIRCUIT
 
-    let diff_exp_big = BigNat::alloc_from_nat(
-        &mut cs.namespace(|| "expected diff in bignat"),
-        || Ok(BigInt::from_bytes_le(Plus, &diff_exp)),
-        128,
-        2,
-    )?;
-    BigNat::equal(&diff, &mut cs.namespace(|| "check equal"), &diff_exp_big)?;
+    // let diff_exp = U256::checked_sub(
+    //     &U256::checked_add(
+    //         &U256::from_le_bytes(F::to_repr(&in1.get_value().unwrap())),
+    //         &(U256::from(1u64) << 255),
+    //     )
+    //     .unwrap(),
+    //     &U256::from_le_bytes(F::to_repr(&in2.get_value().unwrap())),
+    // )
+    // .unwrap()
+    // .to_le_bytes();
 
-    let diff_bits_var = diff.decompose(cs)?;
+    // let diff_exp_big = BigNat::alloc_from_nat(
+    //     &mut cs.namespace(|| "expected diff in bignat"),
+    //     || Ok(BigInt::from_bytes_le(Plus, &diff_exp)),
+    //     128,
+    //     2,
+    // )?;
+    // BigNat::equal(&diff, &mut cs.namespace(|| "check equal"), &diff_exp_big)?;
+
+    let diff_bits_var = diff.decompose(&mut cs.namespace(|| "decompose into bits"))?;
     assert_eq!(diff_bits_var.allocations.len(), 256);
-    Ok(Boolean::constant(diff_bits_var.allocations[255].value.unwrap()).not())
+    let last_bit = AllocatedBit::alloc(&mut cs.namespace(|| "alloc last bit"), diff_bits_var.allocations[255].value)?;
+    Ok(Boolean::from(last_bit).not())
 }
 
 #[derive(Clone)]
@@ -110,11 +107,11 @@ where
         leaf: Leaf<F, A>,
     ) -> AllocatedLeaf<F, A> {
         AllocatedLeaf {
-            value: AllocatedNum::alloc(cs.namespace(|| "leaf value"), || Ok(leaf.value)).unwrap(),
-            next_value: AllocatedNum::alloc(cs.namespace(|| "next value"), || Ok(leaf.next_value))
+            value: AllocatedNum::alloc(cs.namespace(|| "leaf value"), || Ok(leaf.value.unwrap())).unwrap(),
+            next_value: AllocatedNum::alloc(cs.namespace(|| "next value"), || Ok(leaf.next_value.unwrap()))
                 .unwrap(),
             next_index: AllocatedNum::alloc(cs.namespace(|| "next index value"), || {
-                Ok(leaf.next_index)
+                Ok(leaf.next_index.unwrap())
             })
             .unwrap(),
             leaf: leaf,
@@ -124,13 +121,14 @@ where
 
 pub fn is_member<
     F: PrimeField + PrimeFieldBits,
-    A: Arity<F>,
+    AL: Arity<F>,
+    AN: Arity<F>,
     const N: usize,
     CS: ConstraintSystem<F>,
 >(
     cs: &mut CS,
     root_var: AllocatedNum<F>,
-    leaf_var: AllocatedLeaf<F, A>,
+    leaf_var: AllocatedLeaf<F, AL>,
     mut idx_var: Vec<AllocatedBit>,
     siblings_var: Vec<AllocatedNum<F>>,
 ) -> Result<Boolean, SynthesisError> {
@@ -139,8 +137,8 @@ pub fn is_member<
     assert_eq!(idx_var.len(), N);
     assert_eq!(idx_var.len(), siblings_var.len());
 
-    let node_hash_params = Sponge::<F, U2>::api_constants(Strength::Standard);
-    let leaf_hash_params = Sponge::<F, U3>::api_constants(Strength::Standard);
+    let node_hash_params = Sponge::<F, AN>::api_constants(Strength::Standard);
+    let leaf_hash_params = Sponge::<F, AL>::api_constants(Strength::Standard);
     let mut cur_hash_var = hash_circuit(
         &mut cs.namespace(|| "hash num -1 :"),
         val_var,
@@ -173,18 +171,19 @@ pub fn is_member<
 
 pub fn is_non_member<
     F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + PartialOrd,
-    A: Arity<F>,
+    AL: Arity<F>,
+    AN: Arity<F>,
     const N: usize,
     CS: ConstraintSystem<F>,
 >(
     mut cs: CS,
     root_var: AllocatedNum<F>,
-    tree: IndexTree<F, N>,
+    tree: IndexTree<F, N, AL, AN>,
     new_value: AllocatedNum<F>,
 ) -> Result<Boolean, SynthesisError> {
     // Get low leaf
-    let (low_leaf, low_index_int) = tree.get_low_leaf(new_value.get_value().unwrap());
-    let low_leaf_var: AllocatedLeaf<F, U3> = AllocatedLeaf::alloc_leaf(&mut cs, low_leaf);
+    let (low_leaf, low_index_int) = tree.get_low_leaf(new_value.get_value());
+    let low_leaf_var: AllocatedLeaf<F, AL> = AllocatedLeaf::alloc_leaf(&mut cs, low_leaf);
     let low_leaf_idx = idx_to_bits(N, F::from(low_index_int));
     let low_leaf_siblings = tree.get_siblings_path(low_leaf_idx.clone()).siblings;
 
@@ -201,7 +200,7 @@ pub fn is_non_member<
         .collect::<Result<Vec<AllocatedBit>, SynthesisError>>()?;
 
     // check that low_leaf_var is_member
-    let is_member = Boolean::from(is_member::<F, U3, N, CS>(
+    let is_member = Boolean::from(is_member::<F, AL, AN, N, CS>(
         &mut cs,
         root_var.clone(),
         low_leaf_var.clone(),
@@ -212,7 +211,9 @@ pub fn is_non_member<
 
     let out: Boolean;
 
-    if low_leaf_var.next_index.get_value().unwrap() == F::ZERO {
+    // CHECK AFTER THIS POINT
+
+    if low_leaf_var.next_index.get_value() == Some(F::ZERO) {
         // the low leaf is at the very end, so the new_value must be higher than all values in the tree
         // low_leaf.value < new_value
         out = is_less(
@@ -242,12 +243,13 @@ pub fn is_non_member<
 // Remeber to check that new_value is_non_member before calling insert
 pub fn insert<
     F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits + PartialOrd,
-    A: Arity<F>,
+    AL: Arity<F>,
+    AN: Arity<F>,
     const N: usize,
     CS: ConstraintSystem<F>,
 >(
     mut cs: CS,
-    mut tree: IndexTree<F, N>,
+    mut tree: IndexTree<F, N, AL, AN>,
     root_var: AllocatedNum<F>,
     new_val: AllocatedNum<F>,
 ) -> Result<(), SynthesisError> {
@@ -267,7 +269,7 @@ pub fn insert<
     let empty_leaf_var = AllocatedLeaf::alloc_leaf::<
         Namespace<'_, F, <CS as ConstraintSystem<F>>::Root>,
     >(&mut cs.namespace(|| "empty leaf"), Leaf::default());
-    let check_empty = is_member::<F, A, N, CS>(
+    let check_empty = is_member::<F, AL, AN, N, CS>(
         &mut cs,
         root_var.clone(),
         empty_leaf_var,
@@ -277,7 +279,7 @@ pub fn insert<
     Boolean::enforce_equal(&mut cs, &check_empty, &Boolean::constant(true))?;
 
     // Get low leaf
-    let (low_leaf, low_index_int) = tree.get_low_leaf(new_val.get_value().unwrap());
+    let (low_leaf, low_index_int) = tree.get_low_leaf(new_val.get_value());
 
     let mut low_leaf_var =
         AllocatedLeaf::alloc_leaf(&mut cs.namespace(|| "alloc low leaf"), low_leaf.clone());
@@ -289,7 +291,7 @@ pub fn insert<
     let check_less = is_less(&mut cs, new_val.clone(), low_leaf_var.next_value.clone())?;
     let check_zero = Boolean::from(AllocatedBit::alloc(
         cs.namespace(|| "is zero"),
-        Some(low_leaf_var.next_value.get_value().unwrap() == F::ZERO),
+        Some(low_leaf_var.next_value.get_value() == Some(F::ZERO)),
     )?);
     let check_range1 = Boolean::not(&Boolean::and(
         &mut cs,
@@ -319,10 +321,10 @@ pub fn insert<
         next_value: low_leaf_var.next_value,
         next_index: low_leaf_var.next_index,
         leaf: Leaf {
-            value: new_val.get_value().unwrap(),
+            value: new_val.get_value(),
             next_value: low_leaf.next_value,
             next_index: low_leaf.next_index,
-            _arity: PhantomData::<U3>,
+            _arity: PhantomData::<AL>,
         },
     };
 
@@ -334,9 +336,9 @@ pub fn insert<
         })?;
     low_leaf_var.leaf = Leaf {
         value: low_leaf.value,
-        next_value: new_val.get_value().unwrap(),
-        next_index: tree.next_insertion_idx,
-        _arity: PhantomData::<U3>,
+        next_value: new_val.get_value(),
+        next_index: Some(tree.next_insertion_idx),
+        _arity: PhantomData::<AL>,
     };
 
     // Insert new low leaf into tree
@@ -420,17 +422,18 @@ mod tests {
     use crate::tree::indextree::{idx_to_bits, IndexTree, Leaf};
     use bellperson::util_cs::test_cs::TestConstraintSystem;
     use bellperson::{gadgets::num::AllocatedNum, ConstraintSystem, SynthesisError};
-    use generic_array::typenum::U3;
+    use generic_array::typenum::{U3, U2};
     use pasta_curves::group::ff::Field;
     use pasta_curves::Fp;
     use std::marker::PhantomData;
+    use num_bigint::BigUint;
 
     #[test]
     fn test_insert_circuit() {
         let mut rng = rand::thread_rng();
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
+        let tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
         let new_value = Fp::random(&mut rng);
 
@@ -439,7 +442,7 @@ mod tests {
             AllocatedNum::alloc_input(cs.namespace(|| "root var"), || Ok(tree.root)).unwrap();
         let new_val_var =
             AllocatedNum::alloc(cs.namespace(|| "new value"), || Ok(new_value)).unwrap();
-        insert::<Fp, U3, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
+        insert::<Fp, U3, U2, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
             cs.namespace(|| "Insert value"),
             tree.clone(),
             root_var,
@@ -457,7 +460,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let mut tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
+        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
 
         let low_leaf = empty_leaf.clone();
@@ -466,7 +469,7 @@ mod tests {
         let next_leaf_idx = idx_to_bits(HEIGHT, next_insertion_index);
 
         let new_leaf = Leaf {
-            value: new_value,
+            value: Some(new_value),
             next_value: low_leaf.next_value,
             next_index: low_leaf.next_index,
             _arity: PhantomData::<U3>,
@@ -508,7 +511,7 @@ mod tests {
 
         // Check new_leaf is_member
         let is_valid = Boolean::from(
-            is_member::<Fp, U3, HEIGHT, TestConstraintSystem<Fp>>(
+            is_member::<Fp, U3, U2, HEIGHT, TestConstraintSystem<Fp>>(
                 &mut cs,
                 root_var,
                 val_var,
@@ -529,7 +532,7 @@ mod tests {
     fn test_non_mem_circuit() {
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let mut tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
+        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
 
         let low_leaf = empty_leaf.clone();
@@ -538,7 +541,7 @@ mod tests {
         let next_leaf_idx = idx_to_bits(HEIGHT, next_insertion_index);
 
         let new_leaf = Leaf {
-            value: new_value,
+            value: Some(new_value),
             next_value: low_leaf.next_value,
             next_index: low_leaf.next_index,
             _arity: PhantomData::<U3>,
@@ -567,7 +570,7 @@ mod tests {
             AllocatedNum::alloc(cs.namespace(|| "non member"), || Ok(non_member)).unwrap();
         // Check new_leaf is_non_member
         let is_non_member =
-            is_non_member::<Fp, U3, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
+            is_non_member::<Fp, U3, U2, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
                 cs.namespace(|| "check non member"),
                 root_var,
                 tree.clone(),
@@ -588,8 +591,8 @@ mod tests {
 
         let mut cs = TestConstraintSystem::<Fp>::new();
 
-        let in1_int = U256::from_le_bytes(in1.to_repr());
-        let in2_int = U256::from_le_bytes(in2.to_repr());
+        let in1_int = BigUint::from_bytes_le(&in1.to_repr());
+        let in2_int = BigUint::from_bytes_le(&in2.to_repr());
 
         let in1_var: AllocatedNum<Fp> =
             AllocatedNum::alloc(cs.namespace(|| "in1"), || Ok(in1)).unwrap();
