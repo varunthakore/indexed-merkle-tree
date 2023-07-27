@@ -1,4 +1,3 @@
-use generic_array::typenum::{U2, U3};
 use neptune::poseidon::PoseidonConstants;
 use neptune::sponge::vanilla::{Sponge, SpongeTrait};
 use neptune::{Arity, Strength};
@@ -13,18 +12,18 @@ use crate::hash::vanilla::hash;
 
 #[derive(Debug, Clone)]
 pub struct Leaf<F: PrimeField + PrimeFieldBits, A: Arity<F>> {
-    pub value: F,
-    pub next_value: F,
-    pub next_index: F,
+    pub value: Option<F>,
+    pub next_value: Option<F>,
+    pub next_index: Option<F>,
     pub _arity: PhantomData<A>,
 }
 
 impl<F: PrimeField + PrimeFieldBits, A: Arity<F>> Default for Leaf<F, A> {
     fn default() -> Self {
         Self {
-            value: F::ZERO,
-            next_value: F::ZERO,
-            next_index: F::ZERO,
+            value: Some(F::ZERO),
+            next_value: Some(F::ZERO),
+            next_index: Some(F::ZERO),
             _arity: PhantomData,
         }
     }
@@ -37,9 +36,9 @@ where
 {
     pub fn leaf_to_vec(&self) -> Vec<F> {
         let mut input: Vec<F> = vec![];
-        input.push(self.value);
-        input.push(self.next_value);
-        input.push(self.next_index);
+        input.push(self.value.unwrap());
+        input.push(self.next_value.unwrap());
+        input.push(self.next_index.unwrap());
 
         assert_eq!(input.len(), 3);
         // input = [value, next_value, next_index]
@@ -53,29 +52,29 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct IndexTree<F: PrimeField + PrimeFieldBits, const N: usize> {
+pub struct IndexTree<F: PrimeField + PrimeFieldBits, const N: usize, AL: Arity<F>, AN: Arity<F>> {
     pub root: F,
     pub hash_db: HashMap<String, (F, F)>,
-    pub inserted_leaves: Vec<Leaf<F, U3>>,
+    pub inserted_leaves: Vec<Leaf<F, AL>>,
     pub next_insertion_idx: F,
-    pub leaf_hash_params: PoseidonConstants<F, U3>,
-    pub node_hash_params: PoseidonConstants<F, U2>,
+    pub leaf_hash_params: PoseidonConstants<F, AL>,
+    pub node_hash_params: PoseidonConstants<F, AN>,
 }
 
-impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> IndexTree<F, N> {
+impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize, AL: Arity<F>, AN: Arity<F>> IndexTree<F, N, AL, AN> {
     // Create a new tree. `empty_leaf_val` is the default value for leaf of empty tree.
-    pub fn new(empty_leaf_val: Leaf<F, U3>, depth: usize) -> IndexTree<F, N> {
+    pub fn new(empty_leaf_val: Leaf<F, AL>, depth: usize) -> IndexTree<F, N, AL, AN> {
         assert!(depth > 0);
         let mut hash_db = HashMap::<String, (F, F)>::new();
-        let leaf_hash_params = Sponge::<F, U3>::api_constants(Strength::Standard);
-        let node_hash_params = Sponge::<F, U2>::api_constants(Strength::Standard);
-        let mut cur_hash = Leaf::<F, U3>::hash_leaf(&empty_leaf_val, &leaf_hash_params);
+        let leaf_hash_params = Sponge::<F, AL>::api_constants(Strength::Standard);
+        let node_hash_params = Sponge::<F, AN>::api_constants(Strength::Standard);
+        let mut cur_hash = Leaf::<F, AL>::hash_leaf(&empty_leaf_val, &leaf_hash_params);
         for _ in 0..depth {
             let val = (cur_hash.clone(), cur_hash.clone());
             cur_hash = hash(vec![cur_hash.clone(), cur_hash.clone()], &node_hash_params);
             hash_db.insert(format!("{:?}", cur_hash.clone()), val);
         }
-        let inserted_leaves: Vec<Leaf<F, U3>> = vec![empty_leaf_val];
+        let inserted_leaves: Vec<Leaf<F, AL>> = vec![empty_leaf_val];
         let next_insertion_index = F::ONE;
 
         Self {
@@ -95,7 +94,7 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> IndexTree<F, N
         assert!(empty_path.is_member_vanilla(next_leaf_idx.clone(), &Leaf::default(), self.root));
 
         // Get low leaf
-        let (mut low_leaf, low_index_int) = self.get_low_leaf(new_val);
+        let (mut low_leaf, low_index_int) = self.get_low_leaf(Some(new_val));
         let low_index = F::from(low_index_int);
         let mut low_leaf_idx = idx_to_bits(N, low_index);
 
@@ -104,25 +103,25 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> IndexTree<F, N
         assert!(low_leaf_path.is_member_vanilla(low_leaf_idx.clone(), &low_leaf, self.root));
 
         // Range check low leaf against new value
-        assert!(new_val < low_leaf.next_value || low_leaf.next_value == F::ZERO);
-        assert!(new_val > low_leaf.value);
+        assert!(new_val < low_leaf.next_value.unwrap() || low_leaf.next_value.unwrap() == F::ZERO);
+        assert!(new_val > low_leaf.value.unwrap());
 
         // Update new leaf pointers
         let new_leaf = Leaf {
-            value: new_val,
+            value: Some(new_val),
             next_value: low_leaf.next_value,
             next_index: low_leaf.next_index,
-            _arity: PhantomData::<U3>,
+            _arity: PhantomData::<AL>,
         };
 
         // Update low leaf pointers
-        low_leaf.next_index = self.next_insertion_idx;
+        low_leaf.next_index = Some(self.next_insertion_idx);
         low_leaf.next_value = new_leaf.value;
 
         // Insert new low leaf into tree
         let mut low_leaf_siblings = low_leaf_path.siblings;
         low_leaf_idx.reverse(); // Reverse since path was from root to leaf but I am going leaf to root
-        let mut cur_low_leaf_hash = Leaf::<F, U3>::hash_leaf(&low_leaf, &self.leaf_hash_params);
+        let mut cur_low_leaf_hash = Leaf::<F, AL>::hash_leaf(&low_leaf, &self.leaf_hash_params);
         for d in low_leaf_idx {
             let sibling = low_leaf_siblings.pop().unwrap();
             let (l, r) = if d == false {
@@ -144,7 +143,7 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> IndexTree<F, N
         let mut new_leaf_idx = idx_to_bits(N, self.next_insertion_idx); // from root to leaf
         let mut new_leaf_siblings = self.get_siblings_path(new_leaf_idx.clone()).siblings;
         new_leaf_idx.reverse(); // from leaf to root
-        let mut cur_new_leaf_hash = Leaf::<F, U3>::hash_leaf(&new_leaf, &self.leaf_hash_params);
+        let mut cur_new_leaf_hash = Leaf::<F, AL>::hash_leaf(&new_leaf, &self.leaf_hash_params);
         for d in new_leaf_idx {
             let sibling = new_leaf_siblings.pop().unwrap();
             let (l, r) = if d == false {
@@ -168,7 +167,7 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> IndexTree<F, N
     pub fn get_siblings_path(
         &self,
         idx_in_bits: Vec<bool>, // root to leaf
-    ) -> Path<F, N> {
+    ) -> Path<F, N, AL, AN> {
         let mut cur_node = self.root;
         let mut siblings = Vec::<F>::new();
 
@@ -196,18 +195,33 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> IndexTree<F, N
         }
     }
 
-    pub fn get_low_leaf(&self, new_value: F) -> (Leaf<F, U3>, u64) {
-        let mut low_leaf = Leaf::default();
-        let mut low_index = 0;
-        for (i, leaf) in self.inserted_leaves.iter().enumerate() {
-            if leaf.value < new_value && (leaf.next_value > new_value || leaf.next_value == F::ZERO)
-            {
-                low_leaf = leaf.clone();
-                low_index = i as u64;
-                break;
+    pub fn get_low_leaf(&self, new_value: Option<F>) -> (Leaf<F, AL>, u64) {
+
+        match new_value {
+            Some(new_value) => {
+                let mut low_leaf = Leaf::default();
+                let mut low_index = 0;
+                for (i, leaf) in self.inserted_leaves.iter().enumerate() {
+                    if leaf.value.unwrap() < new_value && (leaf.next_value.unwrap() > new_value || leaf.next_value.unwrap() == F::ZERO)
+                    {
+                        low_leaf = leaf.clone();
+                        low_index = i as u64;
+                        break;
+                    }
+                }
+                (low_leaf, low_index)
+            }
+            None => {
+                let low_leaf = Leaf {
+                    value: None,
+                    next_index: None,
+                    next_value: None,
+                    _arity: PhantomData
+                };
+                (low_leaf, 0u64)
             }
         }
-        (low_leaf, low_index)
+
     }
 }
 
@@ -234,21 +248,23 @@ pub fn idx_to_bits<F: PrimeField + PrimeFieldBits>(depth: usize, idx: F) -> Vec<
 }
 
 #[derive(Clone)]
-pub struct Path<F, const N: usize>
+pub struct Path<F, const N: usize, AL, AN>
 where
     F: PrimeField + PrimeFieldBits,
+    AL: Arity<F>, 
+    AN: Arity<F>,
 {
     pub siblings: Vec<F>, // siblings from root to leaf
-    pub leaf_hash_params: PoseidonConstants<F, U3>,
-    pub node_hash_params: PoseidonConstants<F, U2>,
+    pub leaf_hash_params: PoseidonConstants<F, AL>,
+    pub node_hash_params: PoseidonConstants<F, AN>,
 }
 
-impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> Path<F, N> {
-    pub fn compute_root(&self, mut idx_in_bits: Vec<bool>, val: &Leaf<F, U3>) -> F {
+impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize, AL: Arity<F>, AN: Arity<F>> Path<F, N, AL, AN> {
+    pub fn compute_root(&self, mut idx_in_bits: Vec<bool>, val: &Leaf<F, AL>) -> F {
         assert_eq!(self.siblings.len(), N);
         idx_in_bits.reverse(); // from leaf to root
 
-        let mut cur_hash = Leaf::<F, U3>::hash_leaf(val, &self.leaf_hash_params);
+        let mut cur_hash = Leaf::<F, AL>::hash_leaf(val, &self.leaf_hash_params);
 
         for (i, sibling) in self.siblings.clone().into_iter().rev().enumerate() {
             let (l, r) = if idx_in_bits[i] == false {
@@ -267,7 +283,7 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> Path<F, N> {
     pub fn is_member_vanilla(
         &self,
         idx_in_bits: Vec<bool>, // from root to leaf
-        leaf: &Leaf<F, U3>,
+        leaf: &Leaf<F, AL>,
         root: F,
     ) -> bool {
         let computed_root = self.compute_root(idx_in_bits, &leaf);
@@ -277,7 +293,7 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> Path<F, N> {
     // Check that there is no Leaf with value = new_value in the tree
     pub fn is_non_member_vanilla(
         &self,
-        low_leaf: &Leaf<F, U3>,
+        low_leaf: &Leaf<F, AL>,
         low_leaf_idx: Vec<bool>, // from root to leaf
         new_value: F,
         root: F,
@@ -286,10 +302,10 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize> Path<F, N> {
         assert!(self.is_member_vanilla(low_leaf_idx.clone(), &low_leaf, root));
 
         // Range check low leaf against new value
-        if low_leaf.next_index == F::ZERO {
-            return low_leaf.value < new_value; // the low leaf is at the very end, so the new_value must be higher than all values in the tree
+        if low_leaf.next_index == Some(F::ZERO) {
+            return low_leaf.value < Some(new_value); // the low leaf is at the very end, so the new_value must be higher than all values in the tree
         } else {
-            return low_leaf.value < new_value && low_leaf.next_value > new_value;
+            return low_leaf.value < Some(new_value) && low_leaf.next_value > Some(new_value);
         }
     }
 }
@@ -299,7 +315,7 @@ mod tests {
     use super::Leaf;
     use super::*;
     use crate::tree::indextree::IndexTree;
-    use generic_array::typenum::U3;
+    use generic_array::typenum::{U3, U2};
     use pasta_curves::group::ff::Field;
     use pasta_curves::pallas::Base as Fp;
     use std::marker::PhantomData;
@@ -309,17 +325,17 @@ mod tests {
         let mut rng = rand::thread_rng();
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let mut tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
+        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
 
         let num_values = 100;
         let values: Vec<Fp> = (0..num_values).map(|_| Fp::random(&mut rng)).collect();
 
         for new_value in values {
             let next_leaf_idx = idx_to_bits(HEIGHT, tree.next_insertion_idx);
-            let (low_leaf, _) = tree.get_low_leaf(new_value);
+            let (low_leaf, _) = tree.get_low_leaf(Some(new_value));
 
             let new_leaf = Leaf {
-                value: new_value,
+                value: Some(new_value),
                 next_value: low_leaf.next_value,
                 next_index: low_leaf.next_index,
                 _arity: PhantomData::<U3>,
@@ -350,12 +366,12 @@ mod tests {
     fn test_non_member() {
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let mut tree: IndexTree<Fp, HEIGHT> = IndexTree::new(empty_leaf.clone(), HEIGHT);
+        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
 
         let new_value = Fp::from(20 as u64);
         let next_leaf_idx = idx_to_bits(HEIGHT, tree.next_insertion_idx);
-        let (low_leaf, low_int) = tree.get_low_leaf(new_value);
+        let (low_leaf, low_int) = tree.get_low_leaf(Some(new_value));
         let low_leaf_idx = idx_to_bits(HEIGHT, Fp::from(low_int));
 
         // Check that new_value=20 is_non_member
@@ -368,7 +384,7 @@ mod tests {
         ));
 
         let new_leaf = Leaf {
-            value: new_value,
+            value: Some(new_value),
             next_value: low_leaf.next_value,
             next_index: low_leaf.next_index,
             _arity: PhantomData::<U3>,
@@ -390,7 +406,7 @@ mod tests {
         let new_low_leaf = Leaf {
             value: low_leaf.value,
             next_value: new_leaf.value,
-            next_index: tree.next_insertion_idx - Fp::one(),
+            next_index: Some(tree.next_insertion_idx - Fp::one()),
             _arity: PhantomData::<U3>,
         };
         let new_low_leaf_path = tree.get_siblings_path(low_leaf_idx.clone());
