@@ -51,27 +51,6 @@ pub fn is_less<F: PrimeField<Repr = [u8; 32]> + PrimeFieldBits, CS: ConstraintSy
         &in2_big,
     )?;
 
-    // COMMENTING SINCE diff IS CALCULATED IN CIRCUIT
-
-    // let diff_exp = U256::checked_sub(
-    //     &U256::checked_add(
-    //         &U256::from_le_bytes(F::to_repr(&in1.get_value().unwrap())),
-    //         &(U256::from(1u64) << 255),
-    //     )
-    //     .unwrap(),
-    //     &U256::from_le_bytes(F::to_repr(&in2.get_value().unwrap())),
-    // )
-    // .unwrap()
-    // .to_le_bytes();
-
-    // let diff_exp_big = BigNat::alloc_from_nat(
-    //     &mut cs.namespace(|| "expected diff in bignat"),
-    //     || Ok(BigInt::from_bytes_le(Plus, &diff_exp)),
-    //     128,
-    //     2,
-    // )?;
-    // BigNat::equal(&diff, &mut cs.namespace(|| "check equal"), &diff_exp_big)?;
-
     let diff_bits_var = diff.decompose(&mut cs.namespace(|| "decompose into bits"))?;
     assert_eq!(diff_bits_var.allocations.len(), 256);
     let last_bit = AllocatedBit::alloc(&mut cs.namespace(|| "alloc last bit"), diff_bits_var.allocations[255].value)?;
@@ -209,22 +188,24 @@ pub fn is_non_member<
     )?);
     Boolean::enforce_equal(&mut cs, &is_member, &Boolean::constant(true))?;
 
-    let out: Boolean;
+    let cond = Boolean::constant(low_leaf_var.next_index.get_value() == Some(F::ZERO)); // Check low leaf is at the very end
 
-    // CHECK AFTER THIS POINT
-
-    if low_leaf_var.next_index.get_value() == Some(F::ZERO) {
+    let out1 = {
+        // Case when low leaf is at the very end
         // the low leaf is at the very end, so the new_value must be higher than all values in the tree
         // low_leaf.value < new_value
-        out = is_less(
-            &mut cs.namespace(|| "low_leaf.value < new_value"),
+        is_less(
+            &mut cs.namespace(|| "low leaf at end - low_leaf.value < new_value"),
             low_leaf_var.value.clone(),
             new_value.clone(),
-        )?;
-    } else {
+        )?
+    };
+
+    let out2 = {
+        // Case when low leaf is not at the very end
         // low_leaf.value < new_value && new_value < low_leaf.next_value
         let cond1 = is_less(
-            &mut cs.namespace(|| "low_leaf.value < new_value"),
+            &mut cs.namespace(|| "low leaf not at end - low_leaf.value < new_value"),
             low_leaf_var.value.clone(),
             new_value.clone(),
         )?;
@@ -234,9 +215,13 @@ pub fn is_non_member<
             low_leaf_var.next_value.clone(),
         )?;
 
-        out = Boolean::and(&mut cs, &cond1, &cond2)?;
+        Boolean::and(&mut cs, &cond1, &cond2)?
     };
 
+    let and1 = Boolean::and(&mut cs.namespace(|| "cond & out1"), &cond, &out1)?;
+    let and2 = Boolean::and(&mut cs.namespace(|| "not cond and out2"), &cond.not(), &out2)?;
+
+    let out = Boolean::and(&mut cs.namespace(|| "and1 + and2"), &and1.not(), &and2.not())?.not();
     Ok(out)
 }
 
