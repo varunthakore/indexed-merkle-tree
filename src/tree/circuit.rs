@@ -234,7 +234,7 @@ pub fn insert<
     CS: ConstraintSystem<F>,
 >(
     mut cs: CS,
-    mut tree: IndexTree<F, N, AL, AN>,
+    tree: &mut IndexTree<F, N, AL, AN>,
     root_var: AllocatedNum<F>,
     new_val: AllocatedNum<F>,
 ) -> Result<(), SynthesisError> {
@@ -418,7 +418,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
+        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
         println!("root is {:?}", tree.root);
         let new_value = Fp::random(&mut rng);
 
@@ -429,11 +429,12 @@ mod tests {
             AllocatedNum::alloc(cs.namespace(|| "new value"), || Ok(new_value)).unwrap();
         insert::<Fp, U3, U2, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
             cs.namespace(|| "Insert value"),
-            tree.clone(),
+            &mut tree,
             root_var,
             new_val_var,
         )
         .unwrap();
+        println!("root is {:?}", tree.root);
         println!("the number of inputs are {:?}", cs.num_inputs());
         println!("the number of constraints are {}", cs.num_constraints());
 
