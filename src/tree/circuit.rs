@@ -336,7 +336,7 @@ pub fn insert<
         &tree.leaf_hash_params,
     )?
     .get_value()
-    .unwrap();
+    .unwrap_or(F::ZERO); // default value to pass None
     for (i, d) in low_leaf_idx.iter().enumerate() {
         let sibling = low_leaf_siblings.pop().unwrap();
         let (l, r) = if *d == false {
@@ -355,7 +355,7 @@ pub fn insert<
             &tree.node_hash_params,
         )?
         .get_value()
-        .unwrap();
+        .unwrap_or(F::ZERO); // default value to pass None
         tree.hash_db
             .insert(format!("{:?}", cur_low_leaf_hash.clone()), val);
     }
@@ -372,7 +372,7 @@ pub fn insert<
         &tree.leaf_hash_params,
     )?
     .get_value()
-    .unwrap();
+    .unwrap_or(F::ZERO); // default value to pass None
     for (i, d) in new_leaf_idx.iter().enumerate() {
         let sibling = new_leaf_siblings.pop().unwrap();
         let (l, r) = if *d == false {
@@ -391,7 +391,7 @@ pub fn insert<
             &tree.node_hash_params,
         )?
         .get_value()
-        .unwrap();
+        .unwrap_or(F::ZERO); // default value to pass None
 
         tree.hash_db
             .insert(format!("{:?}", cur_new_leaf_hash.clone()), val);
