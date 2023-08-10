@@ -63,13 +63,13 @@ pub struct IndexTree<F: PrimeField + PrimeFieldBits, const N: usize, AL: Arity<F
 
 impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize, AL: Arity<F>, AN: Arity<F>> IndexTree<F, N, AL, AN> {
     // Create a new tree. `empty_leaf_val` is the default value for leaf of empty tree.
-    pub fn new(empty_leaf_val: Leaf<F, AL>, depth: usize) -> IndexTree<F, N, AL, AN> {
-        assert!(depth > 0);
+    pub fn new(empty_leaf_val: Leaf<F, AL>) -> IndexTree<F, N, AL, AN> {
+        assert!(N > 0);
         let mut hash_db = HashMap::<String, (F, F)>::new();
         let leaf_hash_params = Sponge::<F, AL>::api_constants(Strength::Standard);
         let node_hash_params = Sponge::<F, AN>::api_constants(Strength::Standard);
         let mut cur_hash = Leaf::<F, AL>::hash_leaf(&empty_leaf_val, &leaf_hash_params);
-        for _ in 0..depth {
+        for _ in 0..N {
             let val = (cur_hash.clone(), cur_hash.clone());
             cur_hash = hash(vec![cur_hash.clone(), cur_hash.clone()], &node_hash_params);
             hash_db.insert(format!("{:?}", cur_hash.clone()), val);
@@ -163,6 +163,25 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize, AL: Arity<F>, 
         self.inserted_leaves.push(new_leaf); // Push the new lead to inserted leaf
     }
 
+    // Check that there is no Leaf with value = new_value in the tree
+    pub fn is_non_member_vanilla(
+        &self,
+        new_value: F,
+    ) -> bool {
+        // Check that low leaf is memeber, self is siblings path for low_leaf
+        let (low_leaf, low_int) = self.get_low_leaf(Some(new_value));
+        let low_leaf_idx = idx_to_bits(N, F::from(low_int));
+        let low_path = self.get_siblings_path(low_leaf_idx.clone());
+        assert!(low_path.is_member_vanilla(low_leaf_idx.clone(), &low_leaf, self.root));
+
+        // Range check low leaf against new value
+        if low_leaf.next_index == Some(F::ZERO) {
+            return low_leaf.value < Some(new_value); // the low leaf is at the very end, so the new_value must be higher than all values in the tree
+        } else {
+            return low_leaf.value < Some(new_value) && low_leaf.next_value > Some(new_value);
+        }
+    }
+
     // Get siblings given leaf index
     pub fn get_siblings_path(
         &self,
@@ -202,7 +221,7 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize, AL: Arity<F>, 
                 let mut low_leaf = Leaf::default();
                 let mut low_index = 0;
                 for (i, leaf) in self.inserted_leaves.iter().enumerate() {
-                    if leaf.value.unwrap() < new_value && (leaf.next_value.unwrap() > new_value || leaf.next_value.unwrap() == F::ZERO)
+                    if leaf.value.unwrap() < new_value && (leaf.next_value.unwrap() >= new_value || leaf.next_value.unwrap() == F::ZERO)
                     {
                         low_leaf = leaf.clone();
                         low_index = i as u64;
@@ -289,25 +308,6 @@ impl<F: PrimeField + PrimeFieldBits + PartialOrd, const N: usize, AL: Arity<F>, 
         let computed_root = self.compute_root(idx_in_bits, &leaf);
         computed_root == root
     }
-
-    // Check that there is no Leaf with value = new_value in the tree
-    pub fn is_non_member_vanilla(
-        &self,
-        low_leaf: &Leaf<F, AL>,
-        low_leaf_idx: Vec<bool>, // from root to leaf
-        new_value: F,
-        root: F,
-    ) -> bool {
-        // Check that low leaf is memeber, self is siblings path for low_leaf
-        assert!(self.is_member_vanilla(low_leaf_idx.clone(), &low_leaf, root));
-
-        // Range check low leaf against new value
-        if low_leaf.next_index == Some(F::ZERO) {
-            return low_leaf.value < Some(new_value); // the low leaf is at the very end, so the new_value must be higher than all values in the tree
-        } else {
-            return low_leaf.value < Some(new_value) && low_leaf.next_value > Some(new_value);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -321,11 +321,11 @@ mod tests {
     use std::marker::PhantomData;
 
     #[test]
-    fn test_insert() {
+    fn test_vanilla() {
         let mut rng = rand::thread_rng();
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
+        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone());
 
         let num_values = 100;
         let values: Vec<Fp> = (0..num_values).map(|_| Fp::random(&mut rng)).collect();
@@ -348,6 +348,8 @@ mod tests {
                 &new_leaf.clone(),
                 tree.root
             ));
+            // Before inserting, is_non_member should pass
+            assert!(tree.is_non_member_vanilla(new_value));
 
             // Insert new value at next_insertion_index
             tree.insert_vanilla(new_value);
@@ -359,70 +361,9 @@ mod tests {
                 &new_leaf.clone(),
                 tree.root
             ));
+
+            // After inserting, is_non_member should fail
+            assert!(!tree.is_non_member_vanilla(new_value));
         }
-    }
-
-    #[test]
-    fn test_non_member() {
-        const HEIGHT: usize = 32;
-        let empty_leaf = Leaf::default();
-        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
-        println!("root is {:?}", tree.root);
-
-        let new_value = Fp::from(20 as u64);
-        let next_leaf_idx = idx_to_bits(HEIGHT, tree.next_insertion_idx);
-        let (low_leaf, low_int) = tree.get_low_leaf(Some(new_value));
-        let low_leaf_idx = idx_to_bits(HEIGHT, Fp::from(low_int));
-
-        // Check that new_value=20 is_non_member
-        let low_leaf_path = tree.get_siblings_path(low_leaf_idx.clone());
-        assert!(low_leaf_path.is_non_member_vanilla(
-            &low_leaf,
-            low_leaf_idx.clone(),
-            new_value,
-            tree.root
-        ));
-
-        let new_leaf = Leaf {
-            value: Some(new_value),
-            next_value: low_leaf.next_value,
-            next_index: low_leaf.next_index,
-            _arity: PhantomData::<U3>,
-        };
-
-        // Insert new_value=20 at next_insertion_index
-        tree.insert_vanilla(new_value.clone());
-        println!("root is {:?}", tree.root);
-
-        // Check that new leaf is inseted at next_insertion_index
-        let inserted_path = tree.get_siblings_path(next_leaf_idx.clone());
-        assert!(inserted_path.is_member_vanilla(
-            next_leaf_idx.clone(),
-            &new_leaf.clone(),
-            tree.root
-        ));
-
-        // Checking value = 20 for is_non_member should fail
-        let new_low_leaf = Leaf {
-            value: low_leaf.value,
-            next_value: new_leaf.value,
-            next_index: Some(tree.next_insertion_idx - Fp::one()),
-            _arity: PhantomData::<U3>,
-        };
-        let new_low_leaf_path = tree.get_siblings_path(low_leaf_idx.clone());
-        assert!(!new_low_leaf_path.is_non_member_vanilla(
-            &new_low_leaf,
-            low_leaf_idx.clone(),
-            Fp::from(20 as u64),
-            tree.root
-        ));
-
-        // Checking value = 40 for is_non_member should pass
-        assert!(inserted_path.is_non_member_vanilla(
-            &new_leaf,
-            next_leaf_idx,
-            Fp::from(40 as u64),
-            tree.root
-        ));
     }
 }
