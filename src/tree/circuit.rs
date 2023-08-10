@@ -414,11 +414,11 @@ mod tests {
     use num_bigint::BigUint;
 
     #[test]
-    fn test_insert_circuit() {
+    fn test_insert() {
         let mut rng = rand::thread_rng();
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
+        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone() );
         println!("root is {:?}", tree.root);
         let new_value = Fp::random(&mut rng);
 
@@ -442,67 +442,83 @@ mod tests {
     }
 
     #[test]
-    fn test_member_circuit() {
+    fn test_member() {
         let mut rng = rand::thread_rng();
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
-        println!("root is {:?}", tree.root);
-
+        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone());
         let low_leaf = empty_leaf.clone();
         let new_value = Fp::random(&mut rng);
-        let next_insertion_index = Fp::one();
+        let next_insertion_index = tree.next_insertion_idx;
         let next_leaf_idx = idx_to_bits(HEIGHT, next_insertion_index);
-
         let new_leaf = Leaf {
             value: Some(new_value),
             next_value: low_leaf.next_value,
             next_index: low_leaf.next_index,
             _arity: PhantomData::<U3>,
         };
-
-        // Insert new_value at next_insertion_index
-        tree.insert_vanilla(new_value.clone());
-
-        // Check that new leaf is inseted at next_insertion_index
-        let inserted_path = tree.get_siblings_path(next_leaf_idx.clone());
-        assert!(inserted_path.is_member_vanilla(
-            next_leaf_idx.clone(),
-            &new_leaf.clone(),
-            tree.root
-        ));
-
+        let insert_path = tree.get_siblings_path(next_leaf_idx.clone());
         let mut cs = TestConstraintSystem::<Fp>::new();
 
         // Allocating all variables
-        let root_var: AllocatedNum<Fp> =
-            AllocatedNum::alloc_input(cs.namespace(|| "root"), || Ok(tree.root)).unwrap();
-
+        let root_var: AllocatedNum<Fp> = AllocatedNum::alloc_input(cs.namespace(|| "root"), || Ok(tree.root)).unwrap();
+        let new_val_var = AllocatedNum::alloc(&mut cs.namespace(|| "alloc new value"), || Ok(new_value)).unwrap();
         let val_var: AllocatedLeaf<Fp, U3> = AllocatedLeaf::alloc_leaf(&mut cs, new_leaf);
-
-        let siblings_var: Vec<AllocatedNum<Fp>> = inserted_path
+        let siblings_var: Vec<AllocatedNum<Fp>> = insert_path
             .siblings
             .into_iter()
             .enumerate()
             .map(|(i, s)| AllocatedNum::alloc(cs.namespace(|| format!("sibling {}", i)), || Ok(s)))
             .collect::<Result<Vec<AllocatedNum<Fp>>, SynthesisError>>()
             .unwrap();
-
-        let idx_var: Vec<AllocatedBit> = next_leaf_idx
+        let idx_var: Vec<AllocatedBit> = next_leaf_idx.clone()
             .into_iter()
             .enumerate()
             .map(|(i, b)| AllocatedBit::alloc(cs.namespace(|| format!("idx {}", i)), Some(b)))
             .collect::<Result<Vec<AllocatedBit>, SynthesisError>>()
             .unwrap();
 
-        // Check new_leaf is_member
+        // Check new_leaf is_member should be false
         let is_valid = Boolean::from(
-            is_member::<Fp, U3, U2, HEIGHT, TestConstraintSystem<Fp>>(
-                &mut cs,
-                root_var,
+            is_member::<Fp, U3, U2, HEIGHT, _>(
+                &mut cs.namespace(|| "is_member false"),
+                root_var.clone(),
+                val_var.clone(),
+                idx_var.clone(),
+                siblings_var,
+            )
+            .unwrap(),
+        );
+        Boolean::enforce_equal(&mut cs, &is_valid, &Boolean::constant(false)).unwrap();
+
+        // Insert new_value
+        insert::<Fp, U3, U2, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
+            cs.namespace(|| "Insert value"),
+            &mut tree,
+            root_var,
+            new_val_var,
+        )
+        .unwrap();
+
+        // Allocate new variables 
+        let new_root_var: AllocatedNum<Fp> = AllocatedNum::alloc_input(cs.namespace(|| "new root"), || Ok(tree.root)).unwrap();
+        let new_insert_path = tree.get_siblings_path(next_leaf_idx.clone());
+        let new_siblings_var: Vec<AllocatedNum<Fp>> = new_insert_path
+            .siblings
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| AllocatedNum::alloc(cs.namespace(|| format!("new sibling {}", i)), || Ok(s)))
+            .collect::<Result<Vec<AllocatedNum<Fp>>, SynthesisError>>()
+            .unwrap();
+
+        // Check new_leaf is_member should be true
+        let is_valid = Boolean::from(
+            is_member::<Fp, U3, U2, HEIGHT, _>(
+                &mut cs.namespace(|| "is_member true"),
+                new_root_var.clone(),
                 val_var,
                 idx_var,
-                siblings_var,
+                new_siblings_var,
             )
             .unwrap(),
         );
@@ -515,15 +531,15 @@ mod tests {
     }
 
     #[test]
-    fn test_non_mem_circuit() {
+    fn test_non_member() {
+        let mut rng = rand::thread_rng();
         const HEIGHT: usize = 32;
         let empty_leaf = Leaf::default();
-        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone(), HEIGHT);
-        println!("root is {:?}", tree.root);
+        let mut tree: IndexTree<Fp, HEIGHT, U3, U2> = IndexTree::new(empty_leaf.clone());
 
         let low_leaf = empty_leaf.clone();
-        let new_value = Fp::from(20 as u64);
-        let next_insertion_index = Fp::one();
+        let new_value = Fp::random(&mut rng);
+        let next_insertion_index = tree.next_insertion_idx;
         let next_leaf_idx = idx_to_bits(HEIGHT, next_insertion_index);
 
         let new_leaf = Leaf {
@@ -535,7 +551,6 @@ mod tests {
 
         // Insert new_value at next_insertion_index
         tree.insert_vanilla(new_value.clone());
-        println!("root is {:?}", tree.root);
 
         // Check that new leaf is inseted at next_insertion_index
         let inserted_path = tree.get_siblings_path(next_leaf_idx.clone());
@@ -550,19 +565,30 @@ mod tests {
         // Allocating all variables
         let root_var: AllocatedNum<Fp> =
             AllocatedNum::alloc_input(cs.namespace(|| "root"), || Ok(tree.root)).unwrap();
+        let alloc_member = AllocatedNum::alloc(&mut cs.namespace(|| "alloc new value"), || Ok(new_value)).unwrap();
+        // Check new_leaf is_non_member should be false
+        let old_is_non_member =
+            is_non_member::<Fp, U3, U2, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
+                cs.namespace(|| "check non member should be false"),
+                root_var.clone(),
+                tree.clone(),
+                alloc_member,
+            ).unwrap();
+        Boolean::enforce_equal(&mut cs, &old_is_non_member, &Boolean::constant(false)).unwrap();
 
-        let non_member = Fp::from(30u64);
+        let non_member = Fp::random(&mut rng);
         let alloc_non_member =
             AllocatedNum::alloc(cs.namespace(|| "non member"), || Ok(non_member)).unwrap();
-        // Check new_leaf is_non_member
-        let is_non_member =
+        // Check new_leaf is_non_member should be true
+        let new_is_non_member =
             is_non_member::<Fp, U3, U2, HEIGHT, Namespace<'_, Fp, TestConstraintSystem<_>>>(
-                cs.namespace(|| "check non member"),
+                cs.namespace(|| "check non member should be true"),
                 root_var,
                 tree.clone(),
                 alloc_non_member,
-            );
-        println!("is_non_member {:?}", is_non_member.unwrap().get_value());
+            ).unwrap();
+        Boolean::enforce_equal(&mut cs, &new_is_non_member, &Boolean::constant(true)).unwrap();
+
         println!("the number of inputs are {:?}", cs.num_inputs());
         println!("the number of constraints are {}", cs.num_constraints());
 
@@ -570,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    fn test_less_circuit() {
+    fn test_less() {
         let mut rng = rand::thread_rng();
         let in1 = Fp::random(&mut rng);
         let in2 = Fp::random(&mut rng);
